@@ -105,6 +105,20 @@ All three sources' results will be reported regardless of direction.
 
 ---
 
+## Session 8 Amendment — Pooled Analysis (2026-04-22)
+
+**Supplementary pre-registration (Session 8 amendment):** Due to lower-than-expected
+per-source chain counts (~5% pass rate for TB, ~18% for SWE with current trajectory
+volumes), the primary hypothesis test will aggregate the real-vs-shuffled comparison
+across all three sources (TB + SWE + human) to achieve adequate statistical power for
+both Sonnet and Haiku effect sizes.  Per-source results are reported as secondary analyses.
+
+This is not a methodology change — pooled analysis was always intended (see §5.1 below);
+this amendment makes the pooling the **primary** test rather than secondary, effective
+2026-04-22 before any chain-level scoring begins.
+
+---
+
 ## Pre-registered Supplementary Analyses (spec §5.1)
 
 1. Effect-size comparison to v1 (Ditto v1 Sonnet gap = 0.20, Haiku gap = 0.059)

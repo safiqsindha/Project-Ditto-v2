@@ -474,5 +474,14 @@ All code is implemented and tested.  Session 8 is the human-action session:
 | `chains/real/swe/` | 92 real chain files |
 | `chains/shuffled/tb/` | Shuffled variants (seeds 42, 1337, 7919) |
 | `chains/shuffled/swe/` | Shuffled variants (seeds 42, 1337, 7919) |
+| `SPEC.md` | Added Session 8 pooled-analysis amendment |
+| `SESSION_LOG.md` | This entry |
+
+### Session 8 Amendment — SPEC.md Pooled Analysis
+
+Added a dated amendment to `SPEC.md` elevating the pooled (TB + SWE + human) comparison
+to the **primary hypothesis test**, replacing per-source as primary.  Rationale: ~5% pass
+rate for TB and ~18% for SWE means per-source power is low; pooling was always planned
+(spec §5.1) and this amendment makes it explicit before any scoring begins.
 
 ---

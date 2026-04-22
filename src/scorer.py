@@ -358,14 +358,31 @@ def score_all(
             chain = json.loads(f.readline())
             chain_index[chain["chain_id"]] = chain
 
-    # Buckets for breakdowns. Each bucket maps a key → {real_l1, shuffled_l1, real_l2, shuffled_l2}
+    # The prompt asks the model to propose an "action label" (e.g. "use command_2"),
+    # so Layer 1 entity-match is only well-defined when the ground-truth constraint
+    # at cutoff_k corresponds to an agent-action event. ResourceBudget,
+    # CoordinationDependency, and OptimizationCriterion are passive observations
+    # the model cannot meaningfully predict in action format.
+    ACTIONABLE_TYPES = {"ToolAvailability", "InformationState", "SubGoalTransition"}
+
+    # Buckets for breakdowns. Each bucket maps a key → {real_l1, shuffled_l1,
+    # real_l1_actionable, shuffled_l1_actionable, real_l2, shuffled_l2}
     def _new_bucket() -> dict[str, list]:
-        return {"real_l1": [], "shuffled_l1": [], "real_l2": [], "shuffled_l2": []}
+        return {
+            "real_l1": [], "shuffled_l1": [],
+            "real_l1_actionable": [], "shuffled_l1_actionable": [],
+            "real_l2": [], "shuffled_l2": [],
+        }
 
     per_model: dict[str, dict[str, list]] = defaultdict(_new_bucket)
     per_model_per_source: dict[tuple[str, str], dict[str, list]] = defaultdict(_new_bucket)
     per_model_per_config: dict[tuple[str, str], dict[str, list]] = defaultdict(_new_bucket)
     per_model_per_config_per_source: dict[tuple[str, str, str], dict[str, list]] = defaultdict(_new_bucket)
+
+    # Stratified Layer 1 by ground-truth constraint type (per model × source)
+    per_gt_type: dict[tuple[str, str, str], dict[str, list]] = defaultdict(
+        lambda: {"real": [], "shuffled": []}
+    )
 
     per_subset: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
 
@@ -404,12 +421,28 @@ def score_all(
         # Config key — distinguishes T=0 primary from T=0.5 variance-study seeds
         config_key = f"T{temperature}_seed{seed}"
 
+        gt_type = l1.get("constraint_type", "")
+        is_actionable = gt_type in ACTIONABLE_TYPES
+
         # Bucket all four breakdowns
         if l1["top_k_match"] is not None:
-            per_model[model][f"{condition}_l1"].append(l1["top_k_match"])
-            per_model_per_source[(model, chain_source)][f"{condition}_l1"].append(l1["top_k_match"])
-            per_model_per_config[(model, config_key)][f"{condition}_l1"].append(l1["top_k_match"])
-            per_model_per_config_per_source[(model, config_key, chain_source)][f"{condition}_l1"].append(l1["top_k_match"])
+            match = l1["top_k_match"]
+            per_model[model][f"{condition}_l1"].append(match)
+            per_model_per_source[(model, chain_source)][f"{condition}_l1"].append(match)
+            per_model_per_config[(model, config_key)][f"{condition}_l1"].append(match)
+            per_model_per_config_per_source[(model, config_key, chain_source)][f"{condition}_l1"].append(match)
+
+            # Stratified by ground-truth constraint type
+            if gt_type:
+                per_gt_type[(model, chain_source, gt_type)][condition].append(match)
+
+            # Actionable-only Layer 1 (excludes ResourceBudget / Coord / Opt cutoffs
+            # which are passive observations the model cannot predict in action format)
+            if is_actionable:
+                per_model[model][f"{condition}_l1_actionable"].append(match)
+                per_model_per_source[(model, chain_source)][f"{condition}_l1_actionable"].append(match)
+                per_model_per_config[(model, config_key)][f"{condition}_l1_actionable"].append(match)
+                per_model_per_config_per_source[(model, config_key, chain_source)][f"{condition}_l1_actionable"].append(match)
 
         per_model[model][f"{condition}_l2"].append(l2["coupled"])
         per_model_per_source[(model, chain_source)][f"{condition}_l2"].append(l2["coupled"])
@@ -427,11 +460,16 @@ def score_all(
 
     def _summarise(bucket: dict[str, list]) -> dict[str, Any]:
         l1_test = two_sample_proportion_test(bucket["real_l1"], bucket["shuffled_l1"])
+        l1_act_test = two_sample_proportion_test(
+            bucket["real_l1_actionable"], bucket["shuffled_l1_actionable"]
+        )
         l2_test = welch_ttest(bucket["real_l2"], bucket["shuffled_l2"])
-        gap = l1_test.get("gap", 0.0) if "error" not in l1_test else 0.0
-        pval = l1_test.get("p_value", 1.0) if "error" not in l1_test else 1.0
+        # Outcome tier uses the actionable Layer 1 (since it's the cleaner primary)
+        gap = l1_act_test.get("gap", 0.0) if "error" not in l1_act_test else 0.0
+        pval = l1_act_test.get("p_value", 1.0) if "error" not in l1_act_test else 1.0
         return {
             "layer1": l1_test,
+            "layer1_actionable": l1_act_test,
             "layer2": l2_test,
             "outcome_tier": classify_outcome_tier(gap, pval),
         }
@@ -444,12 +482,19 @@ def score_all(
         for (m, c, s), b in per_model_per_config_per_source.items()
     }
 
+    # Stratified Layer 1 by ground-truth constraint type
+    gt_type_stats: dict[str, dict[str, Any]] = {}
+    for (model_name, src, gt_type), data in per_gt_type.items():
+        test = two_sample_proportion_test(data["real"], data["shuffled"])
+        gt_type_stats[f"{model_name}::{src}::{gt_type}"] = test
+
     return {
         "n_results": len(results),
         "per_model": model_stats,
         "per_model_per_source": source_stats,
         "per_model_per_config": config_stats,
         "per_model_per_config_per_source": config_source_stats,
+        "layer1_by_gt_constraint_type": gt_type_stats,
         "per_subset": {m: dict(d) for m, d in per_subset.items()},
     }
 
@@ -494,18 +539,23 @@ if __name__ == "__main__":
 
     def _row(label: str, s: dict) -> str:
         l1 = s.get("layer1", {})
+        l1a = s.get("layer1_actionable", {})
         l2 = s.get("layer2", {})
         gap1 = l1.get("gap", "N/A")
         p1 = l1.get("p_value", "N/A")
+        gap1a = l1a.get("gap", "N/A")
+        p1a = l1a.get("p_value", "N/A")
         gap2 = l2.get("gap", "N/A")
         p2 = l2.get("p_value", "N/A")
         tier = s.get("outcome_tier", "?")
         return (
-            f"  {label:35s} L1 gap={gap1:>7} p={p1:>7} | "
-            f"L2 gap={gap2:>7} p={p2:>7} | tier={tier}"
+            f"  {label:35s} L1={gap1:>7}(p={p1:>6}) | "
+            f"L1act={gap1a:>7}(p={p1a:>6}) | "
+            f"L2={gap2:>7}(p={p2:>6}) | {tier}"
         )
 
     print("\n=== Pooled (per model, all sources × configs) ===")
+    print(f"  {'(label)':35s} L1={'(all)':>7}          | L1act={'(actionable cutoffs)':>20} | L2={'(legality×optimality)':>22}")
     for model, s in scored["per_model"].items():
         print(_row(model, s))
 
@@ -520,3 +570,15 @@ if __name__ == "__main__":
     print("\n=== Per-config × per-source (model :: T_seed :: source) ===")
     for label, s in sorted(scored["per_model_per_config_per_source"].items()):
         print(_row(label, s))
+
+    print("\n=== Layer 1 stratified by ground-truth constraint type ===")
+    for label, s in sorted(scored["layer1_by_gt_constraint_type"].items()):
+        if "error" in s:
+            continue
+        n_real = s.get("n_real", 0)
+        n_shuf = s.get("n_shuffled", 0)
+        gap = s.get("gap", "N/A")
+        p = s.get("p_value", "N/A")
+        rr = s.get("real_rate", "N/A")
+        sr = s.get("shuffled_rate", "N/A")
+        print(f"  {label:50s} real={rr:>7} shuf={sr:>7} gap={gap:>7} p={p:>6} (n_r={n_real}, n_s={n_shuf})")

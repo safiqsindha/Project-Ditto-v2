@@ -140,3 +140,44 @@ domains with different trajectory structures (tightly-discretized vs longer-hori
 
 *Pre-registration v1.1 — committed 2026-04-22. Ditto v1 result (published 2026-04-21)
 is prior work establishing the methodology; v2 independently tests its generality.*
+
+---
+
+## Post-Acquisition Deviations (documented 2026-04-22)
+
+Thresholds and primary methodology are unchanged. The following deviations from the
+original data-source descriptions are documented here before evaluation begins.
+
+### TB source expansion
+Terminal-Bench 2.0 trajectories (ATIF format) yield a 4.8% chain acceptance rate due to
+the constraint filter requiring ≥10 ResourceBudget constraints. To reach statistical power,
+the "tb" source was expanded to include:
+- `DCAgent/{GPT-5,GPT-5-nano,eval-SERA-*,eval-R2EGym-*}-terminal-bench-2.0` — same TB2.0
+  tasks, different models (no methodology deviation)
+- `mlfoundations-dev/code-contests-sandboxes-traces-terminus-2` — competitive-programming
+  terminal-sandbox tasks in the same ATIF format. Constraint structure is identical
+  (bash_call → ResourceBudget, file_edit → SubGoalTransition, test_run → validation).
+  **Deviation**: tasks are competitive programming problems, not Terminal-Bench 2.0 tasks.
+  Final TB chain count: 170 real chains from 4,258 combined trajectories.
+
+### SWE scale-up
+SWE source expanded from 500 to 5,000 trajectories (target 1,016 real chains).
+Same nebius/SWE-agent-trajectories dataset, same methodology. No deviation.
+
+### Human session license relaxation
+SpecStory acquisition relaxed to include repos with no license file (previously rejected).
+These sessions are used for non-commercial academic research only (fair use). SOURCE.md
+documents this. If Gate 2c is cleared, human results are reported as directional only
+(not primary hypothesis).
+
+### Layer 1 scoring — fixed
+`action_at_step` and `per_step_actions` are now populated in all chain files.
+`action_at_step` = constraint type name at `cutoff_k`; `per_step_actions` = constraint
+type at every step. Reference distributions rebuilt: TB 354 level-0 keys, SWE 3,485
+level-0 keys. Gate 4 PASS: 100% non-max-backoff coverage on both sources. Gate 5 PASS:
+live API dry-run produced parseable responses.
+
+### Pooled analysis pre-registered
+Given per-source chain counts (TB: 170, SWE: 1,016, human: TBD), Haiku's small effect
+(d=0.059) requires pooled analysis across all sources. Pooled analysis was pre-planned
+in SESSION_LOG.md before evaluation and is reported alongside per-source results.

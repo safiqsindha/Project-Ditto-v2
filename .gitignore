@@ -8,3 +8,11 @@ dist/
 build/
 .pytest_cache/
 .ipynb_checkpoints/
+.cache/
+data/tb_extra_*/
+data/tb_codecontests/
+data/tb_crosscodeeval/
+data/tb_gpt5*/
+data/tb_sera*/
+data/tb_r2egym/
+data/terminal_bench_combined/

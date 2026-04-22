@@ -123,15 +123,24 @@ def _chain_to_dict(
     rendered: str,
 ) -> dict:
     """Serialise a real chain to a JSON-compatible dict."""
+    constraint_dicts = [constraint_to_dict(c) for c in constraints]
+    cutoff_k = len(constraint_dicts) // 2
+    action_at_step = constraint_dicts[cutoff_k]["type"] if constraint_dicts else None
+    per_step_actions = [
+        {"step_idx": i, "action": c["type"]}
+        for i, c in enumerate(constraint_dicts)
+    ]
     return {
         "chain_id": chain_id,
         "match_id": chain_id,
         "source": source,
         "task_id": task_id,
-        "constraints": [constraint_to_dict(c) for c in constraints],
+        "constraints": constraint_dicts,
         "active_pair_by_step": list(active_pairs),
         "rendered": rendered,
-        "action_at_step": None,
+        "cutoff_k": cutoff_k,
+        "action_at_step": action_at_step,
+        "per_step_actions": per_step_actions,
     }
 
 

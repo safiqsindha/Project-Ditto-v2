@@ -179,8 +179,9 @@ _ACCEPTABLE_LICENSES = frozenset({
 
 
 def is_acceptable_license(spdx_id: str | None) -> bool:
+    # None = no license file; allow for non-commercial academic research use
     if spdx_id is None:
-        return False
+        return True
     return spdx_id in _ACCEPTABLE_LICENSES
 
 

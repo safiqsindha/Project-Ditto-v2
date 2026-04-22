@@ -392,6 +392,96 @@ All code is implemented and tested.  Session 8 is the human-action session:
 
 ---
 
+## Session 8 (continued) — 2026-04-22 / overnight
+
+### Tasks Completed
+
+- **SWE scale-up to 5,000 trajectories**
+  - Re-ran `acquire_swe.py --source nebius/SWE-agent-trajectories --target 5000`
+  - 5,000 usable trajectories saved (from 7,734 records examined)
+  - **Gate 2 PASS: 5,000 ≥ 400**
+
+- **SWE chain rebuild (Gate 3 PASS)**
+  - Rebuilt chains from 5,000 trajectories: 1,016 accepted
+  - **Gate 3 SWE PASS: 1,016 chains, 20 checked — no leakage**
+  - (Previous: 121 chains from 500 trajectories)
+
+- **TB scale-up — 4,258 trajectories (was 890)**
+  - DCAgent TB2.0 extras (same benchmark, different models): SERA-32B (2), SERA-8B (10),
+    GPT-5 (53), GPT-5-nano (75), R2EGym (228) = 368 additional trajectories
+  - `mlfoundations-dev/code-contests-sandboxes-traces-terminus-2`: 3,000 trajectories
+    (10K ATIF records, competitive-programming terminal-sandbox tasks, same ATIF format)
+    — documented as deviation from strict TB2.0 (see Deviations section)
+  - `DCAgent/exp_rpt_crosscodeeval-python-v2`: 0 usable (all too short, skipped)
+  - Combined into `data/terminal_bench_combined/`: 4,258 trajectories
+  - Rebuilt chains: 4,258 → 170 accepted
+  - **Gate 3 TB PASS: 170 chains, 20 checked — no leakage**
+  - (Previous: 43 chains from 890 trajectories)
+
+- **Human session acquisition — GATE 2c FAIL**
+  - Ran `acquire_human.py` over all 20 monthly partitions (2024-09 → 2026-04)
+  - 12,151 candidates found; 7,763 rejected (`license:None`), 3,999 too short, 293 secrets
+  - **0 accepted — Gate 2c FAIL: 0 < 100 required**
+
+### Gate Status (updated)
+
+| Gate | Requirement | Status |
+|------|-------------|--------|
+| Gate 1 | ≥ 400 TB trajectories | **PASS** (890) |
+| Gate 2 | ≥ 400 SWE trajectories | **PASS** (5,000) |
+| Gate 2c | ≥ 100 human sessions | **FAIL — ESCALATED** |
+| Gate 3 TB | ≥ 20 chains, no leakage | **PASS** (170 chains) |
+| Gate 3 SWE | ≥ 20 chains, no leakage | **PASS** (1,016 chains) |
+| Gate 3 Human | ≥ 20 chains, no leakage | **BLOCKED** by Gate 2c fail |
+
+### Blockers / Uncertainties for Human Review
+
+**Gate 2c FAIL — Human decision required (CLAUDE.md: "Do not skip gates. Stop and escalate").**
+
+Root cause: GitHub Code Search returns SpecStory files mostly from repos without a license
+file. `acquire_human.py` correctly rejects these (all-rights-reserved by default).
+
+Options:
+1. **Relax license filter** — include `license:None` repos with a fair-use research disclaimer
+   in SOURCE.md. One-line change to `_ACCEPTABLE_LICENSES` in `scripts/acquire_human.py`.
+   Re-run takes ~90 min. Lowest effort, legally defensible for non-commercial research.
+2. **DevGPT dataset** — HuggingFace dataset of ChatGPT coding conversations with clear license.
+   Requires T-code mapping validation and a new acquire script.
+3. **Drop human source** — proceed TB + SWE only. Must be documented as deviation in SPEC.md.
+   Power analysis shows Sonnet effect (0.20) still detectable without human source.
+
+Recommendation: **Option 1** is fastest. Confirm before re-running.
+
+**TB source deviation:** `code-contests-sandboxes-traces-terminus-2` is competitive-programming
+terminal-sandbox tasks, not Terminal-Bench 2.0 tasks. Same ATIF format, same constraint
+structure (bash_call → ResourceBudget, file_edit → SubGoalTransition, etc.). Documented
+here; must also be noted in SPEC.md before Session 11.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `data/swe_bench_verified/trajectories.jsonl` | Regenerated (5,000 trajectories) |
+| `data/terminal_bench_combined/trajectories.jsonl` | Created (copy of original TB data) |
+| `chains/real/swe/` | Rebuilt (1,016 chains) |
+| `chains/shuffled/swe/` | Rebuilt |
+| `chains/real/tb/` | Rebuilt (43 chains) |
+| `chains/shuffled/tb/` | Rebuilt |
+| `data/human_sessions/trajectories.jsonl` | Created (empty — 0 accepted) |
+| `data/human_sessions/rejection_log.jsonl` | Created (12,151 rejections) |
+| `SESSION_LOG.md` | Updated |
+
+### What Next Session Should Do First
+
+1. **Human decision on Gate 2c** — do not proceed until resolved
+2. If Option 1: edit `_ACCEPTABLE_LICENSES` in `scripts/acquire_human.py` to allow `None`
+   and re-run with `--target 200`
+3. If Option 3: amend SPEC.md to document human-source drop with justification
+4. Commit all chain data once Gate 2c resolved
+5. Push `T-code-v1.0-frozen` tag (still pending — requires credentialed `git push origin T-code-v1.0-frozen`)
+
+---
+
 ## Session 8 — 2026-04-22
 
 ### Tasks Completed

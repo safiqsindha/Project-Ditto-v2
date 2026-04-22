@@ -52,6 +52,9 @@ _CUSTOM_ID_SEP = "||"
 # Seconds between batch status polls
 _BATCH_POLL_INTERVAL = 60
 
+# Anthropic Batches API hard limit per submission
+_MAX_BATCH_SIZE = 10_000
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -375,54 +378,68 @@ def run_batch_evaluation(
         for r in raw_requests
     ]
 
-    print(f"[batch] Submitting {len(batch_requests)} requests to Batches API …")
     client = anthropic.Anthropic()
-    batch = client.beta.messages.batches.create(requests=batch_requests)
-    batch_id = batch.id
-    print(f"[batch] Batch ID: {batch_id}  status: {batch.processing_status}")
 
-    # Poll until done
-    while batch.processing_status == "in_progress":
-        print(f"[batch] Polling in {poll_interval}s …")
-        time.sleep(poll_interval)
-        batch = client.beta.messages.batches.retrieve(batch_id)
-        counts = batch.request_counts
-        print(
-            f"[batch] status={batch.processing_status}  "
-            f"processing={counts.processing}  "
-            f"succeeded={counts.succeeded}  "
-            f"errored={counts.errored}"
-        )
+    # Split into chunks to respect Anthropic's per-batch limit
+    chunks = [
+        batch_requests[i: i + _MAX_BATCH_SIZE]
+        for i in range(0, len(batch_requests), _MAX_BATCH_SIZE)
+    ]
+    n_chunks = len(chunks)
+    print(f"[batch] Submitting {len(batch_requests)} requests in {n_chunks} batch(es) …")
 
-    print(f"[batch] Done — {batch.request_counts.succeeded} succeeded, "
-          f"{batch.request_counts.errored} errored")
-
-    # Collect and save results
     succeeded = 0
     errored = 0
-    for result in client.beta.messages.batches.results(batch_id):
-        custom_id = result.custom_id
-        model_name, seed, chain_id = _parse_custom_id(custom_id)
-        cutoff_k, temperature = meta[custom_id]
+    batch_ids: list[str] = []
 
-        if result.result.type == "succeeded":
-            msg = result.result.message
-            response_text = ""
-            for block in msg.content:
-                if block.type == "text":
-                    response_text = block.text.strip()
-                    break
-            _save_results(
-                chain_id, model_name, seed, source,
-                cutoff_k, temperature, response_text, output_dir,
+    for chunk_idx, chunk in enumerate(chunks):
+        print(f"[batch] Chunk {chunk_idx + 1}/{n_chunks}: {len(chunk)} requests …")
+        batch = client.beta.messages.batches.create(requests=chunk)
+        batch_id = batch.id
+        batch_ids.append(batch_id)
+        print(f"[batch] Batch ID: {batch_id}  status: {batch.processing_status}")
+
+        # Poll until this chunk is done
+        while batch.processing_status == "in_progress":
+            print(f"[batch] Polling in {poll_interval}s …")
+            time.sleep(poll_interval)
+            batch = client.beta.messages.batches.retrieve(batch_id)
+            counts = batch.request_counts
+            print(
+                f"[batch] status={batch.processing_status}  "
+                f"processing={counts.processing}  "
+                f"succeeded={counts.succeeded}  "
+                f"errored={counts.errored}"
             )
-            succeeded += 1
-        else:
-            print(f"[batch] ERRORED: {custom_id} — {result.result}")
-            errored += 1
+
+        print(f"[batch] Chunk {chunk_idx + 1} done — "
+              f"{batch.request_counts.succeeded} succeeded, "
+              f"{batch.request_counts.errored} errored")
+
+        # Collect and save results for this chunk
+        for result in client.beta.messages.batches.results(batch_id):
+            custom_id = result.custom_id
+            model_name, seed, chain_id = _parse_custom_id(custom_id)
+            cutoff_k, temperature = meta[custom_id]
+
+            if result.result.type == "succeeded":
+                msg = result.result.message
+                response_text = ""
+                for block in msg.content:
+                    if block.type == "text":
+                        response_text = block.text.strip()
+                        break
+                _save_results(
+                    chain_id, model_name, seed, source,
+                    cutoff_k, temperature, response_text, output_dir,
+                )
+                succeeded += 1
+            else:
+                print(f"[batch] ERRORED: {custom_id} — {result.result}")
+                errored += 1
 
     return {
-        "batch_id": batch_id,
+        "batch_ids": batch_ids,
         "source": source,
         "total_requests": len(batch_requests),
         "succeeded": succeeded,

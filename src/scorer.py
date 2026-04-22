@@ -281,24 +281,39 @@ def classify_outcome_tier(gap: float, p_value: float) -> str:
 
 def score_all(
     results_dir: Path,
-    dist_path: Path,
+    dist_paths: dict[str, Path],
     chains_real_dir: Path,
     chains_shuffled_dir: Path,
 ) -> dict[str, Any]:
     """
     Load all raw results and compute Layer 1, 2, 3 metrics.
 
+    Parameters
+    ----------
+    results_dir    : root directory for raw results (searched recursively)
+    dist_paths     : {source: path} mapping to source-specific reference
+                     distribution pickle files, e.g. {"tb": ..., "swe": ...}
+    chains_real_dir: root of real chain files (searched recursively)
+    chains_shuffled_dir: root of shuffled chain files (searched recursively)
+
     Returns a comprehensive results dict suitable for JSON serialisation.
     """
-    # Load reference distribution (must use ReferenceDistribution.load, NOT pickle.load
-    # directly — the pickle file stores a payload dict, not the object itself)
-    ref_dist = ReferenceDistribution.load(dist_path)
+    # Load reference distributions (one per source)
+    ref_dists: dict[str, ReferenceDistribution] = {}
+    for src, path in dist_paths.items():
+        ref_dists[src] = ReferenceDistribution.load(path)
 
-    # Load all raw results
+    # Load all raw results (recursive search; skip non-result files like manifests)
     results: list[dict] = []
-    for rfile in sorted(results_dir.glob("*.json")):
+    for rfile in sorted(results_dir.glob("**/*.json")):
         with open(rfile) as f:
-            results.append(json.load(f))
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(data, dict) or "chain_id" not in data:
+            continue
+        results.append(data)
 
     print(f"Loaded {len(results)} raw results")
 
@@ -333,14 +348,17 @@ def score_all(
         if not chain:
             continue
 
-        # Get reference distribution for this step
+        # Get reference distribution for this step (source-specific)
         dist: dict[str, float] = {}
-        try:
-            sig = extract_state_signature(chain, cutoff_k)
-            if sig is not None:
-                _top_k, dist, _backoff = ref_dist.lookup(sig)
-        except (KeyError, AttributeError, TypeError) as exc:
-            print(f"[scorer] lookup failed for chain_id={chain_id}: {exc}")
+        chain_source = r.get("source", chain.get("source", ""))
+        ref_dist = ref_dists.get(chain_source) or (next(iter(ref_dists.values())) if ref_dists else None)
+        if ref_dist is not None:
+            try:
+                sig = extract_state_signature(chain, cutoff_k)
+                if sig is not None:
+                    _top_k, dist, _backoff = ref_dist.lookup(sig)
+            except (KeyError, AttributeError, TypeError) as exc:
+                print(f"[scorer] lookup failed for chain_id={chain_id}: {exc}")
 
         # Layer 1
         l1 = score_layer1(model_action, dist)
@@ -387,13 +405,28 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", type=Path, default=Path("results/raw"))
-    parser.add_argument("--dist", type=Path, default=Path("data/reference_dist.pkl"))
+    parser.add_argument("--dist-tb", type=Path, default=None,
+                        help="Reference distribution for TB chains")
+    parser.add_argument("--dist-swe", type=Path, default=None,
+                        help="Reference distribution for SWE chains")
+    parser.add_argument("--dist-human", type=Path, default=None,
+                        help="Reference distribution for human chains")
     parser.add_argument("--chains-real", type=Path, default=Path("chains/real"))
     parser.add_argument("--chains-shuffled", type=Path, default=Path("chains/shuffled"))
     parser.add_argument("--out", type=Path, default=Path("results/scored.json"))
     args = parser.parse_args()
 
-    scored = score_all(args.results, args.dist, args.chains_real, args.chains_shuffled)
+    dist_paths: dict[str, Path] = {}
+    if args.dist_tb:
+        dist_paths["tb"] = args.dist_tb
+    if args.dist_swe:
+        dist_paths["swe"] = args.dist_swe
+    if args.dist_human:
+        dist_paths["human"] = args.dist_human
+    if not dist_paths:
+        parser.error("At least one of --dist-tb, --dist-swe, --dist-human is required")
+
+    scored = score_all(args.results, dist_paths, args.chains_real, args.chains_shuffled)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w") as f:

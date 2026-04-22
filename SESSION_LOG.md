@@ -884,3 +884,76 @@ All data gates from Sessions 1–12 unchanged. Scoring gate: complete.
    telemetry, but below the pre-registered threshold. The v1 → v2 attenuation is an
    interesting finding in itself.
 
+
+## Session 14 — 2026-04-22 — Layer 2 entity scoring + per-config breakdown
+
+### Tasks Completed
+
+- **Fix 1: Layer 2 entity-based scoring**
+  - `src/reference.py`: added `extract_entity_from_constraint()`. Modified `_ingest_chain()` to store entity labels (file_a, command_3, exploration, …) per step instead of constraint type names. Reference distributions are now keyed by abstract entity, matching the model's rendered output format.
+  - Rebuilt `data/reference_tb.pkl` (354 keys) and `data/reference_swe.pkl` (3,485 keys) — same coverage, entity-keyed values.
+  - `src/scorer.py` Layer 2: rewrote `score_layer2()` to filter the entity-keyed reference distribution to legal entities (excluding mentions of currently-unavailable tools) and sum probability mass of entities the response covers via substring containment. Same legality logic as before.
+
+- **Fix 2: Per-config + per-source breakdowns**
+  - `src/scorer.py` `score_all()`: added 4 breakdowns — `per_model` (pooled), `per_model_per_source`, `per_model_per_config` (T0.0_seed42 separated from T0.5 variance seeds), `per_model_per_config_per_source`.
+  - CLI now prints all 4 breakdown tables.
+
+### Results
+
+**Pooled (TB + SWE, all configs):**
+
+| Model | L1 gap | L1 p | L2 gap | L2 p | Tier |
+|-------|--------|------|--------|------|------|
+| Haiku | 0.0141 | 0.003 | **0.0644** | <0.001 | weak_mixed |
+| Sonnet | 0.0080 | 0.112 | **0.0713** | <0.001 | null (L1) |
+
+**Per-source:**
+
+| Model :: Source | L1 gap | L1 p | L2 gap | L2 p |
+|-----------------|--------|------|--------|------|
+| haiku::tb | 0.0425 | 0.0002 | 0.0488 | <0.001 |
+| haiku::swe | 0.0093 | 0.069 | 0.0671 | <0.001 |
+| sonnet::tb | 0.0346 | 0.007 | **0.0884** | <0.001 |
+| sonnet::swe | 0.0035 | 0.520 | 0.0684 | <0.001 |
+
+**Per-config (T=0 primary vs T=0.5 variance study):**
+- T=0 primary configs show same direction, slightly smaller gaps than pooled
+- T=0.5 seeds (1337, 7919) similar magnitude — variance not driving signal
+
+**Notable cell:** `haiku::T0.5_seed7919::tb` clears moderate_positive (L1 gap = 0.051, p = 0.008) — only 1 of 12 cells.
+
+### Pre-registered Threshold Check (SPEC.md §3)
+
+| Criterion | Threshold | Result |
+|-----------|-----------|--------|
+| Layer 1 gap (real − shuffled) | ≥ 0.05 | **NOT MET** (best pooled: 0.014 Haiku; best per-source: 0.043 TB-Haiku) |
+| Layer 1 significance | p < 0.05 | MET on pooled Haiku and both models on TB |
+| **Layer 2 gap (legality × optimality)** | **≥ 0.04** | **MET — all 4 model × source combinations (0.049–0.088)** |
+| **Layer 2 direction** | Consistent with Layer 1 | **MET — positive everywhere** |
+| Strong-positive (gap ≥ 0.08, p < 0.01) | Single model | sonnet::tb L2 = 0.088 (Layer 2 only) |
+| At least one model clears primary | On at least one data source | Layer 1: not at strict threshold. Layer 2: all combinations. |
+
+### Verdict
+
+**Layer 2 secondary confirmation: REPLICATED ROBUSTLY.** All four model × source combinations clear the pre-registered Layer 2 threshold (≥ 0.04 gap, consistent direction with Layer 1) with p ≈ 0.
+
+**Layer 1 primary: NOT REPLICATED at the 0.05 threshold.** Direction is positive in 12/12 cells; magnitude attenuated 4–25× vs v1. TB-only is closer (~0.04) than SWE-only (~0.005).
+
+**Honest framing for write-up:** Project Ditto v2 partially replicates v1. The composite legality × optimality metric (Layer 2, secondary confirmation in the spec) robustly reproduces the real-vs-shuffled discrimination effect across both new domains. The raw top-3 match rate (Layer 1, primary metric) shows the correct sign everywhere but does not clear the pre-registered moderate threshold on the pooled or per-source analysis.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/reference.py` | Added `extract_entity_from_constraint`; `_ingest_chain` rewritten to use entity labels |
+| `src/scorer.py` | Layer 2 entity-scored; 4-tier per-model/source/config breakdown |
+| `data/reference_tb.pkl` | Rebuilt — entity-keyed |
+| `data/reference_swe.pkl` | Rebuilt — entity-keyed |
+| `results/scored.json` | Regenerated with entity-based Layer 2 + breakdowns |
+
+### What's Next
+
+- **Decide framing**: pre-registered honest write-up vs exploratory secondary criterion (sign test) for headline claim
+- Optionally: Layer 3 subset breakdown (already in scored.json `per_subset` but not analyzed)
+- Optionally: explore why TB-only effect is ~3× stronger than SWE-only — trajectory length distribution? constraint composition?
+

@@ -114,51 +114,55 @@ def score_layer2(
     reference_dist: dict[str, float],
 ) -> dict[str, float]:
     """
-    Compute constraint satisfaction rate and coupled composite metric.
+    Compute legality × optimality coupled metric using entity-based scoring.
 
     Legality: did the model propose an action that is permitted by active
-    constraints at step K? A fainted/unavailable unit cannot act.
+    constraints at step K? Mentioning an unavailable tool is illegal (legality = 0).
 
-    Optimality proxy: among legal actions in the reference distribution,
-    what fraction of mass does the model's action capture?
+    Optimality proxy: among legal entities in the reference distribution
+    at this state, what fraction of probability mass does the model's response
+    cover (via substring containment of any entity label)?
+
+    The reference distribution is entity-keyed (e.g. {"file_a": 0.4, "command_3": 0.6}),
+    matching the model's rendered output format.
 
     Returns {"legality": float, "optimality_proxy": float, "coupled": float}
     """
     constraints = chain.get("constraints", [])[:cutoff_k]
 
-    # Determine which units are currently unavailable (fainted / benched as unavailable)
+    # Determine which units are currently unavailable
     unavailable_units: set[str] = set()
-    available_units: set[str] = set()
     for c in constraints:
         if c.get("type") == "ToolAvailability":
-            tool = c.get("tool", "")
+            tool = c.get("tool", "").lower()
             state = c.get("state", "")
             if state == "unavailable":
                 unavailable_units.add(tool)
-                available_units.discard(tool)
             elif state == "available":
-                available_units.add(tool)
                 unavailable_units.discard(tool)
 
-    # Check legality: if model_action mentions an unavailable unit, it's illegal
-    legality = 1.0
+    # Legality: model_action must not mention an unavailable unit
     norm_action = normalize_action(model_action)
-    unavailable_norm = {u.lower() for u in unavailable_units}
-    for unit in unavailable_norm:
-        if unit in norm_action:
+    legality = 1.0
+    for unit in unavailable_units:
+        if unit and normalize_action(unit) in norm_action:
             legality = 0.0
             break
 
-    # Optimality proxy among legal actions
-    norm_ref = {normalize_action(a): p for a, p in reference_dist.items()}
+    # Optimality: filter reference dist to legal entities, then sum mass of
+    # entities the response covers (substring match — same logic as Layer 1).
     legal_dist = {
-        a: p for a, p in norm_ref.items()
-        if not any(u in a for u in unavailable_norm)
+        entity: p for entity, p in reference_dist.items()
+        if entity and not any(u and u in entity.lower() for u in unavailable_units)
     }
     total_legal_mass = sum(legal_dist.values())
-    if total_legal_mass > 0 and legal_dist:
-        legal_dist_normalised = {a: p / total_legal_mass for a, p in legal_dist.items()}
-        optimality_proxy = legal_dist_normalised.get(norm_action, 0.0)
+
+    if total_legal_mass > 0:
+        captured_mass = sum(
+            p for entity, p in legal_dist.items()
+            if normalize_action(entity) in norm_action
+        )
+        optimality_proxy = captured_mass / total_legal_mass
     else:
         optimality_proxy = 0.0
 
@@ -354,17 +358,24 @@ def score_all(
             chain = json.loads(f.readline())
             chain_index[chain["chain_id"]] = chain
 
-    # Score each result
-    per_model: dict[str, dict[str, list]] = defaultdict(lambda: {
-        "real_l1": [], "shuffled_l1": [],
-        "real_l2": [], "shuffled_l2": [],
-    })
+    # Buckets for breakdowns. Each bucket maps a key → {real_l1, shuffled_l1, real_l2, shuffled_l2}
+    def _new_bucket() -> dict[str, list]:
+        return {"real_l1": [], "shuffled_l1": [], "real_l2": [], "shuffled_l2": []}
+
+    per_model: dict[str, dict[str, list]] = defaultdict(_new_bucket)
+    per_model_per_source: dict[tuple[str, str], dict[str, list]] = defaultdict(_new_bucket)
+    per_model_per_config: dict[tuple[str, str], dict[str, list]] = defaultdict(_new_bucket)
+    per_model_per_config_per_source: dict[tuple[str, str, str], dict[str, list]] = defaultdict(_new_bucket)
 
     per_subset: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+
+    skipped_no_chain = 0
 
     for r in results:
         chain_id = r.get("chain_id", "")
         model = r.get("model", "unknown")
+        seed = r.get("seed", 0)
+        temperature = r.get("temperature", 0.0)
         is_real = "_shuffled_" not in chain_id
         condition = "real" if is_real else "shuffled"
         model_action = r.get("response", "").strip()
@@ -372,11 +383,12 @@ def score_all(
 
         chain = chain_index.get(chain_id, {})
         if not chain:
+            skipped_no_chain += 1
             continue
 
-        # Get reference distribution for Layer 2 (source-specific)
+        # Reference distribution for Layer 2 (source-specific)
         dist: dict[str, float] = {}
-        chain_source = r.get("source", chain.get("source", ""))
+        chain_source = r.get("source", chain.get("source", "")) or "unknown"
         ref_dist = ref_dists.get(chain_source) or (next(iter(ref_dists.values())) if ref_dists else None)
         if ref_dist is not None:
             try:
@@ -386,40 +398,58 @@ def score_all(
             except (KeyError, AttributeError, TypeError) as exc:
                 print(f"[scorer] lookup failed for chain_id={chain_id}: {exc}")
 
-        # Layer 1: entity-based match against ground-truth constraint at cutoff_k
-        # (Reference distribution stored type names, but model outputs entity labels —
-        # entity-based matching compares model response against the actual next entity.)
         l1 = score_layer1(model_action, chain, cutoff_k)
+        l2 = score_layer2(model_action, chain, cutoff_k, dist)
+
+        # Config key — distinguishes T=0 primary from T=0.5 variance-study seeds
+        config_key = f"T{temperature}_seed{seed}"
+
+        # Bucket all four breakdowns
         if l1["top_k_match"] is not None:
             per_model[model][f"{condition}_l1"].append(l1["top_k_match"])
+            per_model_per_source[(model, chain_source)][f"{condition}_l1"].append(l1["top_k_match"])
+            per_model_per_config[(model, config_key)][f"{condition}_l1"].append(l1["top_k_match"])
+            per_model_per_config_per_source[(model, config_key, chain_source)][f"{condition}_l1"].append(l1["top_k_match"])
 
-        # Layer 2
-        l2 = score_layer2(model_action, chain, cutoff_k, dist)
         per_model[model][f"{condition}_l2"].append(l2["coupled"])
+        per_model_per_source[(model, chain_source)][f"{condition}_l2"].append(l2["coupled"])
+        per_model_per_config[(model, config_key)][f"{condition}_l2"].append(l2["coupled"])
+        per_model_per_config_per_source[(model, config_key, chain_source)][f"{condition}_l2"].append(l2["coupled"])
 
-        # Layer 3 subsets
+        # Layer 3 subsets (pooled over configs/sources)
         subsets = classify_chain(chain)
         for subset_name, subset_val in subsets.items():
             key = f"{subset_name}:{subset_val}"
             per_subset[model][f"{key}_{condition}_l1"].append(l1.get("top_k_match", 0) or 0)
 
-    # Aggregate Layer 1 + 2 statistics per model
-    model_stats: dict[str, Any] = {}
-    for model_name, data in per_model.items():
-        l1_test = two_sample_proportion_test(data["real_l1"], data["shuffled_l1"])
-        l2_test = welch_ttest(data["real_l2"], data["shuffled_l2"])
-        gap = l1_test.get("gap", 0.0)
-        pval = l1_test.get("p_value", 1.0)
-        tier = classify_outcome_tier(gap, pval)
-        model_stats[model_name] = {
+    if skipped_no_chain:
+        print(f"[scorer] WARN: skipped {skipped_no_chain} results with no matching chain")
+
+    def _summarise(bucket: dict[str, list]) -> dict[str, Any]:
+        l1_test = two_sample_proportion_test(bucket["real_l1"], bucket["shuffled_l1"])
+        l2_test = welch_ttest(bucket["real_l2"], bucket["shuffled_l2"])
+        gap = l1_test.get("gap", 0.0) if "error" not in l1_test else 0.0
+        pval = l1_test.get("p_value", 1.0) if "error" not in l1_test else 1.0
+        return {
             "layer1": l1_test,
             "layer2": l2_test,
-            "outcome_tier": tier,
+            "outcome_tier": classify_outcome_tier(gap, pval),
         }
 
+    model_stats = {m: _summarise(b) for m, b in per_model.items()}
+    source_stats = {f"{m}::{s}": _summarise(b) for (m, s), b in per_model_per_source.items()}
+    config_stats = {f"{m}::{c}": _summarise(b) for (m, c), b in per_model_per_config.items()}
+    config_source_stats = {
+        f"{m}::{c}::{s}": _summarise(b)
+        for (m, c, s), b in per_model_per_config_per_source.items()
+    }
+
     return {
-        "per_model": model_stats,
         "n_results": len(results),
+        "per_model": model_stats,
+        "per_model_per_source": source_stats,
+        "per_model_per_config": config_stats,
+        "per_model_per_config_per_source": config_source_stats,
         "per_subset": {m: dict(d) for m, d in per_subset.items()},
     }
 
@@ -461,9 +491,32 @@ if __name__ == "__main__":
         json.dump(scored, f, indent=2)
 
     print(f"\nResults written to {args.out}")
-    print("\n=== Outcome summary ===")
-    for model, stats_data in scored["per_model"].items():
-        tier = stats_data.get("outcome_tier", "unknown")
-        gap = stats_data["layer1"].get("gap", "N/A")
-        pval = stats_data["layer1"].get("p_value", "N/A")
-        print(f"  {model}: tier={tier}, gap={gap}, p={pval}")
+
+    def _row(label: str, s: dict) -> str:
+        l1 = s.get("layer1", {})
+        l2 = s.get("layer2", {})
+        gap1 = l1.get("gap", "N/A")
+        p1 = l1.get("p_value", "N/A")
+        gap2 = l2.get("gap", "N/A")
+        p2 = l2.get("p_value", "N/A")
+        tier = s.get("outcome_tier", "?")
+        return (
+            f"  {label:35s} L1 gap={gap1:>7} p={p1:>7} | "
+            f"L2 gap={gap2:>7} p={p2:>7} | tier={tier}"
+        )
+
+    print("\n=== Pooled (per model, all sources × configs) ===")
+    for model, s in scored["per_model"].items():
+        print(_row(model, s))
+
+    print("\n=== Per-source (model :: source) ===")
+    for label, s in sorted(scored["per_model_per_source"].items()):
+        print(_row(label, s))
+
+    print("\n=== Per-config (model :: T_seed) ===")
+    for label, s in sorted(scored["per_model_per_config"].items()):
+        print(_row(label, s))
+
+    print("\n=== Per-config × per-source (model :: T_seed :: source) ===")
+    for label, s in sorted(scored["per_model_per_config_per_source"].items()):
+        print(_row(label, s))

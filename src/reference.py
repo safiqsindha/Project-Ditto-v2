@@ -29,6 +29,35 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
+# Entity extraction
+# ---------------------------------------------------------------------------
+# Reference distributions store the abstract entity label (file_a, command_3,
+# exploration, etc.) rather than the constraint type name, so they align with
+# the model's output format (rendered entity labels).
+
+def extract_entity_from_constraint(constraint: dict) -> str | None:
+    """Return the key abstract entity label for a constraint dict, lowercased."""
+    ctype = constraint.get("type", "")
+    if ctype == "ToolAvailability":
+        tool = constraint.get("tool", "")
+        return tool.lower() if tool else None
+    if ctype == "InformationState":
+        obs = constraint.get("observable_added", [])
+        return obs[0].lower() if obs else None
+    if ctype == "SubGoalTransition":
+        return constraint.get("to_phase", "").lower() or None
+    if ctype == "ResourceBudget":
+        return constraint.get("resource", "").lower() or None
+    if ctype == "CoordinationDependency":
+        dep = constraint.get("dependency", "")
+        return dep.lower() if dep else None
+    if ctype == "OptimizationCriterion":
+        obj = constraint.get("objective", "")
+        return obj.lower() if obj else None
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Resource bucketing helper
 # ---------------------------------------------------------------------------
 
@@ -265,33 +294,27 @@ class ReferenceDistribution:
                 self._ingest_chain(chain)
 
     def _ingest_chain(self, chain: dict) -> None:
+        """
+        Ingest a chain into all 4 backoff levels.
+
+        Action per step is the abstract entity label of the constraint at that step
+        (e.g. "file_b", "command_3", "exploration"), not the constraint type name.
+        This matches the model's output format (rendered entity labels).
+        """
         constraints = chain.get("constraints", [])
         if not constraints:
             return
 
-        per_step_actions = chain.get("per_step_actions")
-        pairs: list[tuple[StateSignature, str]] = []
-
-        if per_step_actions:
-            for entry in per_step_actions:
-                step_idx = entry.get("step_idx", 0)
-                action = entry.get("action", "")
-                if action:
-                    sig = extract_state_signature(chain, step_idx)
-                    if sig is not None:
-                        pairs.append((sig, action))
-        else:
-            action = chain.get("action_at_step", "")
-            if action:
-                step_idx = chain.get("cutoff_k", len(constraints) - 1)
-                sig = extract_state_signature(chain, step_idx)
-                if sig is not None:
-                    pairs.append((sig, action))
-
-        for sig, action in pairs:
+        for step_idx, constraint in enumerate(constraints):
+            entity = extract_entity_from_constraint(constraint)
+            if not entity:
+                continue
+            sig = extract_state_signature(chain, step_idx)
+            if sig is None:
+                continue
             for level in range(4):
                 key = sig.to_key(level)
-                self._counts[level][key][action] += 1
+                self._counts[level][key][entity] += 1
 
     def add_observation(self, sig: StateSignature, action: str) -> None:
         for level in range(4):

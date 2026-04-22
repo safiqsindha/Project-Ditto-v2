@@ -296,15 +296,17 @@ def run_all(
 def build_batch_requests(
     chain_files: list[Path],
     source: str,
-) -> list[tuple[str, int, float, dict]]:
+) -> list[tuple[str, str, int, float, int, dict]]:
     """
-    Build all (custom_id, cutoff_k, temperature, params) tuples for the full
-    evaluation matrix (all chains × all models × all EVAL_CONFIGS).
+    Build all request tuples for the full evaluation matrix.
 
-    Returns a list of (custom_id, cutoff_k, temperature, params) ready for
-    submission to client.beta.messages.batches.create().
+    Returns a list of (custom_id, model_name, seed, temperature, cutoff_k, chain_id, params).
+    custom_id is a sequential integer string ("req0000001") that satisfies the
+    Batches API pattern ^[a-zA-Z0-9_-]{1,64}$.  All metadata is stored in the
+    returned tuple; nothing is encoded in the custom_id itself.
     """
     requests = []
+    idx = 0
     for chain_path in chain_files:
         chain = _load_chain(chain_path)
         chain_id = chain["chain_id"]
@@ -312,7 +314,7 @@ def build_batch_requests(
 
         for model_name, model_id in MODELS.items():
             for config in EVAL_CONFIGS:
-                custom_id = _make_custom_id(model_name, config["seed"], chain_id)
+                custom_id = f"req{idx:07d}"
                 params = {
                     "model": model_id,
                     "max_tokens": 50,
@@ -320,7 +322,11 @@ def build_batch_requests(
                     "system": SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": user_message}],
                 }
-                requests.append((custom_id, cutoff_k, config["temperature"], params))
+                requests.append((
+                    custom_id, model_name, config["seed"],
+                    config["temperature"], cutoff_k, chain_id, params,
+                ))
+                idx += 1
 
     return requests
 
@@ -368,13 +374,14 @@ def run_batch_evaluation(
 
     raw_requests = build_batch_requests(chain_files, source)
 
-    # Build cutoff_k and temperature lookup by custom_id
-    meta: dict[str, tuple[int, float]] = {
-        r[0]: (r[1], r[2]) for r in raw_requests
+    # meta: custom_id → (model_name, seed, temperature, cutoff_k, chain_id)
+    meta: dict[str, tuple[str, int, float, int, str]] = {
+        r[0]: (r[1], r[2], r[3], r[4], r[5])
+        for r in raw_requests
     }
 
     batch_requests = [
-        {"custom_id": r[0], "params": r[3]}
+        {"custom_id": r[0], "params": r[6]}
         for r in raw_requests
     ]
 
@@ -419,8 +426,7 @@ def run_batch_evaluation(
         # Collect and save results for this chunk
         for result in client.beta.messages.batches.results(batch_id):
             custom_id = result.custom_id
-            model_name, seed, chain_id = _parse_custom_id(custom_id)
-            cutoff_k, temperature = meta[custom_id]
+            model_name, seed, temperature, cutoff_k, chain_id = meta[custom_id]
 
             if result.result.type == "succeeded":
                 msg = result.result.message

@@ -87,3 +87,106 @@
 2. **Terminal-Bench 2.0 availability**: Session 2 requires ≥400 usable trajectories. If the dataset is not yet publicly available or is gated, an `HF_TOKEN` will be needed and a fallback source strategy should be decided before Session 2 starts.
 
 ---
+
+## Session 2 — 2026-04-22
+
+### Tasks Completed
+
+- Implemented `src/parser_tb.py` — full `parse_tb_trajectory()` for inspect-ai eval log format
+  - Handles tool call messages: classifies bash_call / file_read / file_edit / test_run
+  - Retroactively fills test_run outcomes from tool result messages
+  - Emits error_reveal events when output matches error/exception patterns
+  - Emits context_update event if token usage metadata is present
+  - `filter_trajectory()`: ≥15 events AND outcome ∈ {"pass","fail"}
+- Wrote `scripts/acquire_tb.py`
+  - Accepts `--source` (local path or HuggingFace dataset ID), `--out`, `--target`, `--gate-threshold`
+  - Handles inspect-ai eval log format (dict with "samples" key) and plain JSONL
+  - Gate 1 check: exits with code 1 if usable count < threshold (default 400)
+- Wrote `tests/test_parser_tb.py` — 43 tests across 5 classes:
+  `TestBasicParsing`, `TestOutcomeExtraction`, `TestEventExtraction`,
+  `TestCommandClassification` (12 parametrized cases), `TestFilterTrajectory`
+- Wrote `data/terminal_bench/SOURCE.md` — provenance template, schema, license notes, Gate 1 status
+
+### Gate 1 Status (data gate)
+
+**PENDING** — `scripts/acquire_tb.py` is implemented and tested but data has not been
+downloaded.  Gate 1 (≥400 usable trajectories) cannot be checked until Terminal-Bench 2.0
+data is available.  See Blockers section.
+
+### Deviations from Plan
+
+- Parser implemented fully (not left as stub); safe because T-code is the freeze point.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/parser_tb.py` | Implemented (replaces stub) |
+| `scripts/acquire_tb.py` | Created |
+| `tests/test_parser_tb.py` | Created |
+| `data/terminal_bench/SOURCE.md` | Created |
+
+### Blockers / Uncertainties for Human Review
+
+1. **Terminal-Bench 2.0 dataset location**: The exact HuggingFace dataset ID is not
+   confirmed.  `acquire_tb.py` defaults to `terminal-bench/terminal-bench-2.0`.
+   **Action needed**: confirm dataset ID (or local path) before running data acquisition.
+
+---
+
+## Session 3 — 2026-04-22
+
+### Tasks Completed
+
+- Implemented `src/parser_swe.py` — full `parse_swe_trajectory()` for SWE-agent format
+  - Supports Format A (action/observation step list — most common SWE-agent output)
+  - Supports Format B (chat-style messages — newer SWE-agent / mini-SWE-agent)
+  - Supports `"trajectory"` key as alias for `"traj"`
+  - SWE-bench-specific: `git diff/apply` and editor commands classified as file_edit
+  - Outcome from `info.exit_status` (submitted→pass; early_exit→fail)
+  - Context_update from `info.model_stats.tokens_sent + tokens_received`
+  - Reuses TB parser helpers for event-type uniformity across sources
+- Wrote `scripts/acquire_swe.py` — same structure as `acquire_tb.py`; Gate 2 check at exit
+- Wrote `tests/test_parser_swe.py` — 39 tests across 5 classes:
+  `TestBasicParsing`, `TestOutcomeExtraction`, `TestEventExtraction`,
+  `TestSWECommandClassification` (8 parametrized cases), `TestFilterTrajectory`
+- Wrote `data/swe_bench_verified/SOURCE.md`
+- All 97 tests pass: 15 shuffler + 43 TB parser + 39 SWE parser
+
+### Gate 2 Status (data gate)
+
+**PENDING** — acquisition script implemented but data not yet downloaded.
+
+### Deviations from Plan
+
+- None from spec methodology.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/parser_swe.py` | Implemented (replaces stub) |
+| `scripts/acquire_swe.py` | Created |
+| `tests/test_parser_swe.py` | Created |
+| `data/swe_bench_verified/SOURCE.md` | Created |
+
+### What Session 4 Should Do First
+
+1. Locate public human debugging session data (no copyrighted/ToS-protected material)
+2. Implement `src/parser_human.py` and `scripts/acquire_human.py`
+3. Write `tests/test_parser_human.py` and `data/human_sessions/SOURCE.md`
+4. Confirm TB and SWE dataset IDs; run data acquisition to clear Gates 1 and 2
+
+### Blockers / Uncertainties for Human Review
+
+1. **Terminal-Bench 2.0 dataset ID**: Not confirmed.  Defaults to
+   `terminal-bench/terminal-bench-2.0`.  Gate 1 cannot clear until accessible.
+
+2. **SWE-bench trajectory source**: `princeton-nlp/SWE-bench_Verified` contains task
+   descriptions only, not agent trajectories.  Need a dataset of SWE-agent runs on the
+   Verified split, or a local SWE-agent run.  **Action needed** before Sessions 4/5.
+
+3. **Human session data source**: ≥100 trajectories required.  Public source with permissive
+   license must be identified.  **Human decision needed** on source before Session 4.
+
+---

@@ -575,3 +575,75 @@ rate for TB and ~18% for SWE means per-source power is low; pooling was always p
 (spec §5.1) and this amendment makes it explicit before any scoring begins.
 
 ---
+
+## Sessions 9–10 — 2026-04-22 (continued overnight)
+
+### Tasks Completed
+
+- **TB scale-up to 4,258 trajectories → 170 real chains (Gate 3 + 4 PASS)**
+  - DCAgent TB2.0 extras: GPT-5 (53), GPT-5-nano (75), R2EGym (228), SERA-32B (2), SERA-8B (10)
+  - `mlfoundations-dev/code-contests-sandboxes-traces-terminus-2`: 3,000 trajectories
+  - Combined: 4,258 trajectories → 170 accepted chains
+  - Gate 3 PASS: 170 chains, no leakage
+  - Gate 4 PASS: 100% non-max-backoff (354 level-0 keys)
+
+- **SWE scale-up to 5,000 trajectories → 1,016 real chains (Gate 3 + 4 PASS)**
+  - Gate 3 PASS: 1,016 chains, no leakage
+  - Gate 4 PASS: 100% non-max-backoff (3,485 level-0 keys)
+
+- **Layer 1 fix: populated action_at_step and per_step_actions**
+  - `build_chains.py` updated: `action_at_step` = constraint type at cutoff_k;
+    `per_step_actions` = constraint type at every step; `cutoff_k` stored in chain dict
+  - All chains rebuilt with fix applied
+
+- **Gate 5 PASS: live API dry-run**
+  - Installed anthropic SDK + dependencies for python3.11
+  - API key loaded from .env
+  - 3-chain live run: parseable responses confirmed
+
+- **Human source — Gate 2c FAIL (structural incompatibility — FINAL)**
+  - Run 1 (strict license): 0 accepted — 7,763 license:None rejections
+  - Run 2 (relaxed license): 0 accepted — 10,164 too_short (79% of 12,828 candidates)
+  - Root cause: SpecStory human-AI chat sessions don't produce bash_call events,
+    so T-code cannot generate ≥10 ResourceBudget constraints required by is_valid_chain()
+  - **Decision: human source dropped.** TB + SWE proceed as primary + secondary.
+    SPEC.md updated with deviation documentation.
+
+- **T-code-v1.0-frozen tag pushed to remote**
+- **README updated** with pipeline diagram, gate status, quick start
+
+### Final Gate Status
+
+| Gate | Criterion | Status |
+|------|-----------|--------|
+| Gate 1 | ≥ 400 TB trajectories | **PASS** (4,258) |
+| Gate 2 | ≥ 400 SWE trajectories | **PASS** (5,000) |
+| Gate 2c | ≥ 100 human sessions | **FAIL — human source dropped** |
+| Gate 3 TB | ≥ 20 chains, no leakage | **PASS** (170 chains) |
+| Gate 3 SWE | ≥ 20 chains, no leakage | **PASS** (1,016 chains) |
+| Gate 4 TB | ≥ 90% non-max-backoff | **PASS** (100%) |
+| Gate 4 SWE | ≥ 90% non-max-backoff | **PASS** (100%) |
+| Gate 5 | Parseable responses + Layer 1 | **PASS** |
+
+### What Session 11/12 Should Do
+
+1. Run full evaluation: `python scripts/run_evaluation.py` (~2-4 hrs, ~$80-130)
+2. Verify `results/blinded/` populated
+3. Session 13 (fresh session): run `python -m src.scorer` — see SESSION_LOG for prompt
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `scripts/build_chains.py` | Added action_at_step, per_step_actions, cutoff_k to chain dict |
+| `scripts/acquire_human.py` | Relaxed license filter (allow None) |
+| `SPEC.md` | Documented all deviations + human source drop |
+| `README.md` | Full rewrite with pipeline, status, quick start |
+| `chains/real/tb/` | Rebuilt (170 chains) |
+| `chains/real/swe/` | Rebuilt (1,016 chains) |
+| `chains/shuffled/tb/` | Rebuilt |
+| `chains/shuffled/swe/` | Rebuilt |
+| `data/reference_tb.pkl` | Built (354 keys, 100% coverage) |
+| `data/reference_swe.pkl` | Built (3,485 keys, 100% coverage) |
+
+---

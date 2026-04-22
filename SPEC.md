@@ -164,11 +164,16 @@ the "tb" source was expanded to include:
 SWE source expanded from 500 to 5,000 trajectories (target 1,016 real chains).
 Same nebius/SWE-agent-trajectories dataset, same methodology. No deviation.
 
-### Human session license relaxation
-SpecStory acquisition relaxed to include repos with no license file (previously rejected).
-These sessions are used for non-commercial academic research only (fair use). SOURCE.md
-documents this. If Gate 2c is cleared, human results are reported as directional only
-(not primary hypothesis).
+### Human source dropped (Gate 2c FAIL — structural incompatibility)
+Two full acquisition runs of SpecStory files from GitHub (12,828 candidates total) yielded
+0 accepted sessions. Root cause: SpecStory human-AI chat sessions are too short and
+conversational — 79% rejected as too_short (< 15 events). The T-code requires ≥10
+ResourceBudget constraints (from bash_call events), which human chat turns do not produce.
+This is a structural mismatch, not a filter calibration issue.
+
+**Decision (2026-04-22):** Human source is dropped. Evaluation proceeds on TB + SWE only.
+Human was the "Validation" source in the spec (not primary or secondary); the primary
+hypothesis is unaffected. The pooled analysis (TB + SWE) is the primary test.
 
 ### Layer 1 scoring — fixed
 `action_at_step` and `per_step_actions` are now populated in all chain files.

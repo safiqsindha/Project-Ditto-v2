@@ -190,3 +190,204 @@ data is available.  See Blockers section.
    license must be identified.  **Human decision needed** on source before Session 4.
 
 ---
+
+## Session 4 — 2026-04-22
+
+### Tasks Completed
+
+- Implemented `src/parser_human.py` — full `parse_human_session()` for SpecStory Markdown format
+  - Splits turns by `## User/Assistant/Agent/Human/AI/Copilot/System` headers
+  - `_classify_user_turn()`: traceback-containing turns → error_reveal; code block → file_read; else → task_transition
+  - `_classify_assistant_turn()`: bash block with test keyword → test_run; bash block → bash_call; code block → file_edit
+  - `detect_secrets(content)`: patterns for Anthropic/OpenAI keys, GitHub PATs, AWS keys, bearer tokens, credential assignments
+  - `redact_emails(content)`: replaces email addresses with `[REDACTED_EMAIL]`
+  - `filter_trajectory(min_events=5)`: lower threshold appropriate for human sessions
+  - `parse_human_session(raw)`: raw dict with {session_id, content, repo}
+- Wrote `scripts/acquire_human.py` — GitHub Code Search API acquisition of SpecStory files
+  - `GitHubClient` class: `search_code()`, `get_blob()`, `get_repo_license()` via urllib
+  - Monthly date-prefix partitioned queries: `path:.specstory/history filename:YYYY-MM extension:md`
+  - Rate limiting: 2.2s between search requests, 0.5s between blob/repo fetches
+  - JSON file caching in `.cache/acquire_human/`
+  - `_ACCEPTABLE_LICENSES` frozenset: MIT, Apache-2.0, BSD-2/3-Clause, ISC, Unlicense, CC0-1.0, MPL-2.0, LGPL variants
+  - Writes `trajectories.jsonl` AND `rejection_log.jsonl`
+  - Gate 2c check: exits code 1 if usable < 100
+- Wrote `tests/test_parser_human.py` — 30 tests across 6 classes:
+  `TestTurnSplitting`, `TestBasicParsing`, `TestEventTypes`, `TestOutcome`,
+  `TestFilterTrajectory`, `TestSecretDetection`
+- Wrote `data/human_sessions/SOURCE.md` — SpecStory methodology, acquisition script, license notes, Gate 2c status
+
+### Gate 2c Status
+
+**PENDING** — acquisition script implemented and tested; real GitHub acquisition requires
+GITHUB_TOKEN and human action.  Gate 2c (≥100 sessions) cannot clear until acquisition runs.
+
+### Deviations from Plan
+
+- **Revised data source** (user instruction): Human sessions are sourced from SpecStory
+  Markdown files in public GitHub repos (arXiv 2604.00436 methodology), NOT general
+  debugging session databases.  This matches the revised Session 4 instructions.
+- `detect_secrets()` and `redact_emails()` placed in `src/parser_human.py` (not only in
+  acquire_human.py) to be testable and importable by any module that processes raw content.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/parser_human.py` | Implemented (replaces stub) |
+| `scripts/acquire_human.py` | Created |
+| `tests/test_parser_human.py` | Created |
+| `data/human_sessions/SOURCE.md` | Created |
+
+### Blockers / Uncertainties for Human Review
+
+1. **GITHUB_TOKEN required**: `scripts/acquire_human.py` requires a GitHub personal access
+   token with `public_repo` (read-only) scope.  Set `GITHUB_TOKEN` env var before running.
+   Gate 2c cannot clear without this.
+
+---
+
+## Session 5 — 2026-04-22
+
+### Tasks Completed
+
+- Implemented `src/aggregation.py` — source-specific event compression
+  - `aggregate_tb_events()`: drops lone no-ops (ls/pwd/echo without useful follow-up);
+    collapses consecutive identical bash_calls; collapses consecutive same-path file_reads
+  - `aggregate_swe_events()`: collapses file-read bursts (≥3 consecutive → 1 with burst_size);
+    compresses retry loops (same bash_call repeated N times → retry_count); truncates
+    error_reveal messages to 120 chars
+  - `aggregate_human_events()`: collapses consecutive identical task_transitions; merges
+    consecutive same-path file_edits; passes all other events through unchanged
+  - `aggregate_events(events, source)`: dispatcher to source-specific function
+- Wrote `tests/test_aggregation.py` — 29 tests across 4 classes:
+  `TestTBAggregation`, `TestSWEAggregation`, `TestHumanAggregation`, `TestDispatcher`
+- All 156 tests pass: 15 shuffler + 43 TB parser + 39 SWE parser + 30 human parser + 29 aggregation
+
+### Gate Status
+
+No data gates in Session 5.  Code-quality gate: all 156 tests pass.
+
+### Deviations from Plan
+
+- None.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/aggregation.py` | Implemented (replaces stub) |
+| `tests/test_aggregation.py` | Created |
+
+---
+
+## Session 6 — 2026-04-22
+
+### Tasks Completed
+
+- Implemented `src/translation.py` — T-code: trajectory events → Constraint objects
+  - All six Constraint dataclasses: `ResourceBudget`, `ToolAvailability`, `SubGoalTransition`,
+    `InformationState`, `CoordinationDependency`, `OptimizationCriterion`
+  - `TranslationContext`: mutable state across events — phase, label maps, resource levels,
+    uncertainty, flags
+  - Per-event translators (all in `_TRANSLATORS` dict):
+    - `bash_call` → `ResourceBudget(context_window)` + optional `ToolAvailability(context_window, unavailable)` at <20% remaining
+    - `file_read` → `InformationState(observable_added=[file_label])`
+    - `file_edit` → `SubGoalTransition(→implementation)` first time; `ToolAvailability(file_label, available)` subsequently
+    - `test_run pass` → `SubGoalTransition(→validation)` + `OptimizationCriterion`
+    - `test_run fail` → `SubGoalTransition(→debugging)` + `ResourceBudget(patience)` + `ToolAvailability(test_suite, unavailable, recover_in=3)`
+    - `error_reveal` → alternates `InformationState` (even) / `CoordinationDependency` (odd)
+    - `context_update` → `ResourceBudget(context_window)` + optional `ToolAvailability(context_window, unavailable)` if >80% used
+    - `task_transition` → `SubGoalTransition`
+  - `translate_trajectory(events, source) → (list[Constraint], list[tuple[str, str]])`
+    returns constraints AND active_pair_by_step (phase, last_command_label)
+  - `constraint_to_dict()` / `constraint_from_dict()`: JSON serialization
+- Wrote `tests/test_translation.py` — 40 tests across 4 classes:
+  `TestEventTranslation` (22), `TestTranslateTrajectory` (5), `TestFilterInvariants` (6),
+  `TestSerialisation` (7)
+  - Key test: `test_valid_trajectory_passes_filter` — synthetic trajectory satisfies all
+    `is_valid_chain()` invariants (≥10 RB, ≥2 SGT, ≥1 TA unavailable, length 20–40)
+- All 196 tests pass
+
+### T-code Freeze
+
+T-code (`src/translation.py`, `src/aggregation.py`) is frozen as of this session under
+pre-registration tag `T-code-v1.0-frozen`.  The tag exists locally; push requires human
+action (see blockers from Session 1).
+
+### Deviations from Plan
+
+- None from methodology.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/translation.py` | Implemented (replaces stub) |
+| `tests/test_translation.py` | Created |
+
+---
+
+## Session 7 — 2026-04-22
+
+### Tasks Completed
+
+- Expanded `src/renderer.py` programming-domain leakage vocabulary
+  - From ~50 seed terms to ~140 terms across: Python keywords, Python exception types,
+    common packages (Django, Flask, NumPy, PyTorch, etc.), shell commands (git, make,
+    pip, npm, docker, etc.), programming jargon, file/path vocabulary
+  - Fixed false positive: `_render_information_state` changed from "none" to "(empty)"
+    for empty observable lists — previously matched `None` in vocab case-insensitively
+- Wrote `scripts/build_chains.py` — full pipeline script
+  - Steps: load trajectories.jsonl → reconstruct TrajectoryEvent objects → aggregate →
+    translate (T-code) → asymmetric observability → `is_valid_chain()` filter → render
+    (leakage check) → shuffle (seeds 42, 1337, 7919) → save JSONL to chains/real/ and
+    chains/shuffled/
+  - `--gate3` flag: verifies ≥20 real chains pass leakage check; exits code 1 on failure
+  - Per-trajectory error categorisation: no_events / filter_fail / leakage / other_error
+- Wrote `tests/test_pipeline_e2e.py` — 32 end-to-end integration tests
+  - `TestFullPipelineTB/SWE/Human`: pipeline produces valid, filter-passing, leak-free chains
+  - `TestShuffler`: ordering changes, type counts preserved, timestamps non-decreasing, seeds differ
+  - `TestSerialisation`: round-trip through constraint_to_dict/from_dict and JSONL file
+  - `TestGate3Synthetic`: 20 chains/source (60 chains + 40 TB = 100 chains total) pass
+    leakage check — Gate 3 validated on synthetic data
+  - `TestBuildChainsModule`: unit tests for `build_chains.py` helpers
+- Gate 3 (synthetic) — **PASSED**: 40+ TB, 20 SWE, 20 human synthetic chains all pass
+  `render_chain()` without programming vocabulary leakage
+
+### Gate 3 Status
+
+**PASSED (synthetic)** — Gate 3 validated on synthetic trajectories.  Real-data Gate 3
+(≥20 chains/source from actual trajectories.jsonl) cannot run until data acquisition
+(Sessions 2c, 3c, 4c) completes with human action.
+
+### Deviations from Plan
+
+- None from methodology.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/renderer.py` | Expanded vocab (~50→~140 terms); fixed false positive in IS rendering |
+| `scripts/build_chains.py` | Created |
+| `tests/test_pipeline_e2e.py` | Created |
+
+### What Session 8 Should Do First
+
+All code is implemented and tested.  Session 8 is the human-action session:
+1. Confirm Terminal-Bench 2.0 dataset ID and run `scripts/acquire_tb.py` → Gate 1
+2. Provide SWE-bench trajectory source and run `scripts/acquire_swe.py` → Gate 2
+3. Set `GITHUB_TOKEN` and run `scripts/acquire_human.py` → Gate 2c
+4. Run `scripts/build_chains.py` for each source → Gate 3 on real data
+5. Push the `T-code-v1.0-frozen` tag to remote
+
+### Blockers / Uncertainties for Human Review
+
+1. **Data acquisition requires human action**: All three data gates (Gate 1, 2, 2c) require
+   human-supplied credentials or dataset paths.  The pipeline is ready but cannot run without
+   real data.
+
+2. **T-code-v1.0-frozen tag not pushed**: Local tag exists; push requires `git push origin
+   T-code-v1.0-frozen` from a credentialed shell.
+
+---

@@ -55,8 +55,8 @@ def _render_subgoal_transition(c: SubGoalTransition) -> str:
 
 
 def _render_information_state(c: InformationState) -> str:
-    added = ", ".join(c.observable_added) if c.observable_added else "none"
-    removed = ", ".join(c.observable_removed) if c.observable_removed else "none"
+    added = ", ".join(c.observable_added) if c.observable_added else "(empty)"
+    removed = ", ".join(c.observable_removed) if c.observable_removed else "(empty)"
     return (
         f"InformationState: added=[{added}] removed=[{removed}]"
         f" uncertainty={c.uncertainty:.2f}"
@@ -147,25 +147,83 @@ def render_trajectory_chain(constraints: list[Constraint], source: str = "tb") -
 # Leakage checker  (full vocabulary list built in Session 7)
 # ---------------------------------------------------------------------------
 
-# Default programming-domain vocabulary — expanded in Session 7.
-# This seed list catches the most obvious leaks during early development.
+# Programming-domain vocabulary — any term appearing in rendered output is a leakage error.
+# Whole-word, case-insensitive matching (see check_programming_leakage).
+# Frozen at T-code-v1.0-frozen — do not modify after that tag.
 _DEFAULT_PROGRAMMING_VOCAB: frozenset[str] = frozenset({
-    # Python keywords
+    # ── Python keywords ────────────────────────────────────────────────────────
     "def", "class", "import", "return", "async", "await", "yield", "lambda",
     "raise", "except", "finally", "with", "pass", "global", "nonlocal",
-    # Common packages (expanded in Session 7)
-    "django", "flask", "numpy", "pandas", "scipy", "sklearn", "matplotlib",
-    "torch", "tensorflow", "requests", "fastapi", "pydantic", "pytest",
-    "sqlalchemy", "celery", "redis", "boto3", "aiohttp",
-    # Common bash commands
-    "grep", "find", "sed", "awk", "curl", "wget", "ssh", "docker",
-    "git", "make", "pip", "npm", "yarn", "cargo", "rustc",
-    # Python error types
+    "elif", "else", "while", "assert", "del", "exec", "print",
+
+    # ── Python built-ins (specific enough to be unlikely in abstract text) ─────
+    "stdin", "stdout", "stderr", "traceback",
+
+    # ── Python error / exception types ────────────────────────────────────────
     "TypeError", "ValueError", "KeyError", "AttributeError", "ImportError",
     "RuntimeError", "IndexError", "NameError", "OSError", "FileNotFoundError",
     "PermissionError", "TimeoutError", "StopIteration", "AssertionError",
-    # File extensions that shouldn't appear literally
-    # (checked as substrings only — whole-word matching applies)
+    "NotImplementedError", "RecursionError", "MemoryError", "OverflowError",
+    "ZeroDivisionError", "UnicodeDecodeError", "UnicodeEncodeError",
+    "ConnectionError", "BrokenPipeError", "FileExistsError", "IsADirectoryError",
+    "ModuleNotFoundError", "SyntaxError", "IndentationError", "SystemExit",
+    "Exception", "BaseException", "Traceback",
+
+    # ── Common Python packages / frameworks ───────────────────────────────────
+    "django", "flask", "fastapi", "starlette", "uvicorn", "gunicorn",
+    "numpy", "pandas", "scipy", "sklearn", "scikit", "matplotlib",
+    "torch", "tensorflow", "keras", "jax", "transformers", "huggingface",
+    "requests", "httpx", "aiohttp", "urllib",
+    "pydantic", "sqlalchemy", "alembic", "pymongo", "motor",
+    "celery", "redis", "kafka", "rabbitmq",
+    "boto3", "botocore", "s3", "lambda",
+    "pytest", "unittest", "mock", "fixtures",
+    "click", "typer", "argparse",
+    "yaml", "toml", "json", "csv", "xml", "html",
+    "asyncio", "threading", "multiprocessing", "subprocess",
+    "pathlib", "shutil", "tempfile", "logging", "traceback",
+
+    # ── Shell / CLI commands ───────────────────────────────────────────────────
+    "grep", "find", "sed", "awk", "sort", "uniq", "wc", "cut", "tr",
+    "curl", "wget", "ssh", "scp", "rsync", "nc", "netcat",
+    "git", "svn", "hg",
+    "make", "cmake", "ninja", "bazel",
+    "pip", "pip3", "conda", "virtualenv", "venv",
+    "npm", "yarn", "pnpm", "node", "npx", "bun",
+    "cargo", "rustc", "rustup",
+    "gcc", "clang", "javac", "java", "kotlin", "go",
+    "docker", "podman", "kubectl", "helm", "terraform", "ansible",
+    "ps", "top", "htop", "kill", "killall", "pkill",
+    "chmod", "chown", "chgrp", "ln", "ls", "pwd", "cd", "mv", "cp",
+    "rm", "mkdir", "rmdir", "touch", "cat", "less", "more", "head", "tail",
+    "echo", "printf", "export", "source", "env", "set", "unset",
+    "tee", "xargs", "parallel", "nohup", "screen", "tmux",
+
+    # ── Programming concepts / jargon ─────────────────────────────────────────
+    "function", "method", "module", "package", "library", "framework",
+    "variable", "parameter", "argument", "constant", "attribute", "property",
+    "interface", "protocol", "abstract", "inherit", "override", "decorator",
+    "iterator", "generator", "coroutine", "callback", "closure",
+    "database", "schema", "migration", "query", "transaction",
+    "endpoint", "route", "middleware", "handler", "controller", "serializer",
+    "test", "unittest", "coverage", "fixture", "assertion",
+    "compiler", "interpreter", "runtime", "bytecode", "binary",
+    "thread", "process", "daemon", "signal", "socket",
+    "token", "api", "sdk", "cli", "ide",
+    "github", "gitlab", "bitbucket", "jira",
+    "commit", "branch", "merge", "rebase", "stash", "checkout",
+    "build", "deploy", "release", "version", "tag",
+    "config", "environment", "dotenv", "secret",
+    "stdout", "stderr", "stdin", "pipe", "redirect",
+
+    # ── File / path vocabulary ─────────────────────────────────────────────────
+    "python", "py", "js", "ts", "jsx", "tsx",
+    "java", "cpp", "hpp", "rb", "go", "rs", "cs", "swift", "kotlin",
+    "html", "css", "scss", "sass", "less",
+    "sql", "sh", "bash", "zsh", "fish",
+    "txt", "md", "rst", "json", "yaml", "toml", "xml", "ini", "cfg",
+    "dockerfile", "makefile", "requirements",
+    "setup", "pyproject", "package",
 })
 
 

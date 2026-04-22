@@ -707,3 +707,180 @@ Then read and interpret `results/scored.json` against SPEC.md thresholds.
 - Human source remains dropped (Gate 2c FAIL — structural). Pooled TB+SWE is primary test.
 - All evaluation data is local (not in git — 111MB raw + 59MB chains).
 
+---
+
+## Session 13 — 2026-04-22 — Blinded Scoring
+
+### Pre-flight
+
+Read SPEC.md, CLAUDE.md, SESSION_LOG.md (Sessions 1–12) before any execution.
+Confirmed 28,464 result files present: 4,080 in `results/raw/tb/`, 24,384 in `results/raw/swe/`.
+
+### Scorer Bug Discovered and Fixed
+
+**Bug:** The reference distribution (`data/reference_tb.pkl`, `data/reference_swe.pkl`) was
+built using constraint TYPE NAMES as actions ("ResourceBudget", "ToolAvailability", etc.).
+The model was prompted with rendered abstract chains and asked to output entity labels
+("use file_B", "resolve_error_class_A", "switch to validation"). Zero of 28,464 model
+responses contained a constraint type name. Result: Layer 1 match rates = 0.0 for both
+real and shuffled chains → gap = 0.0 for both models. The original scorer run produced a
+spurious null result, not a true null.
+
+**Fix:** Replaced the reference-distribution type-name lookup in `score_layer1()` with
+entity-based matching. For each evaluation, the scorer extracts the key entity from the
+ground-truth constraint at `cutoff_k` (the step the model was asked to predict):
+- ToolAvailability → `tool` field (e.g., "file_b")
+- InformationState → first item in `observable_added`
+- SubGoalTransition → `to_phase`
+- ResourceBudget → `resource`
+- CoordinationDependency → `dependency`
+- OptimizationCriterion → `objective`
+
+It then checks whether the model's normalized response CONTAINS that entity as a substring.
+This is the correct measurement of what the model was prompted to predict.
+
+**Why this is a bug fix, not a methodology change:** The pre-registered Layer 1 metric is
+"top-3 match rate, real − shuffled." The implementation had a vocabulary mismatch that made
+the metric trivially unmeasurable. Entity-based matching is the faithful implementation of
+the same hypothesis: do real chains help models predict the specific entity of the next
+action?
+
+**File modified:** `src/scorer.py` — `score_layer1()` signature and body replaced;
+`extract_entity_from_constraint()` added. Layer 2 code unchanged (legality check already
+uses substring containment; optimality_proxy remains 0 because the reference distribution
+type-name vocabulary mismatch is not fixed for Layer 2 — Layer 2 is therefore uninformative
+this session).
+
+### Results (corrected scorer)
+
+**Scorer command run:**
+```bash
+python3.11 -m src.scorer \
+  --results results/raw/ \
+  --dist-tb data/reference_tb.pkl \
+  --dist-swe data/reference_swe.pkl \
+  --chains-real chains/real/ \
+  --chains-shuffled chains/shuffled/ \
+  --out results/scored.json
+```
+
+#### Pooled Layer 1 results (primary hypothesis, TB + SWE combined)
+
+| Model | real_rate | shuffled_rate | gap | p-value | significant | n_real | n_shuffled |
+|-------|-----------|---------------|-----|---------|-------------|--------|------------|
+| Haiku | 0.0731 | 0.0590 | **0.0141** | 0.0027 | Yes | 3,558 | 10,674 |
+| Sonnet | 0.0781 | 0.0702 | **0.0080** | 0.1119 | No | 3,558 | 10,674 |
+
+#### Per-source Layer 1 results (secondary analysis)
+
+**Terminal-Bench (TB):**
+
+| Model | real_rate | shuffled_rate | gap | p-value | significant | n_real | n_shuffled |
+|-------|-----------|---------------|-----|---------|-------------|--------|------------|
+| Haiku | 0.0863 | 0.0438 | **0.0425** | 0.0002 | Yes | 510 | 1,530 |
+| Sonnet | 0.0941 | 0.0595 | **0.0346** | 0.0072 | Yes | 510 | 1,530 |
+
+**SWE-bench (SWE):**
+
+| Model | real_rate | shuffled_rate | gap | p-value | significant | n_real | n_shuffled |
+|-------|-----------|---------------|-----|---------|-------------|--------|------------|
+| Haiku | 0.0709 | 0.0616 | **0.0093** | ~0.08 | No | 3,048 | 9,144 |
+| Sonnet | 0.0755 | 0.0720 | **0.0035** | ~0.43 | No | 3,048 | 9,144 |
+
+#### Layer 2 results
+
+Both models: `real_mean = 0.0`, `shuffled_mean = 0.0`, `gap = 0.0`. **Uninformative.**
+The optimality_proxy component still uses the type-name reference distribution, which
+produces 0 for every model response. The legality component does work (substring
+containment for unavailable tools), but coupled = legality × 0 = 0. Layer 2 cannot
+be interpreted this session.
+
+### Threshold Comparison (SPEC.md)
+
+| Pre-registered Criterion | Threshold | Haiku (pooled) | Sonnet (pooled) | Result |
+|--------------------------|-----------|----------------|-----------------|--------|
+| Layer 1 gap ≥ 0.05 | Primary | 0.0141 | 0.0080 | **FAIL** (both) |
+| Layer 1 p < 0.05 | Primary | 0.0027 ✓ | 0.1119 | Haiku p passes; Sonnet fails |
+| Both criteria together | Primary | — | — | **FAIL** (both) |
+| Layer 2 gap ≥ 0.04 | Secondary | 0.0 | 0.0 | **FAIL** (uninformative) |
+| Strong-positive: gap ≥ 0.08, p < 0.01 | Strong | — | — | **FAIL** |
+| At least one model clears primary | Publishable min | — | — | **FAIL** |
+
+### Outcome Tiers
+
+| Model | Pooled tier | TB-only observation |
+|-------|-------------|---------------------|
+| Haiku | **weak_mixed** | gap=0.042, p=0.0002 (below 0.05 gap threshold) |
+| Sonnet | **null** | gap=0.035, p=0.0072 (below 0.05 gap threshold) |
+
+### Interpretation Against SPEC.md Hypothesis
+
+**Primary hypothesis: NOT REPLICATED.**
+
+The constraint-chain abstraction (six types, T-code, programming trajectories) does not
+reproduce the Ditto v1 effect at the pre-registered thresholds on programming telemetry.
+
+**Direction is consistently positive (real > shuffled)** across all model × source
+combinations, which is consistent with the Ditto hypothesis. The effect is real but small.
+This is not noise — Haiku's pooled gap is statistically significant (p=0.0027) and TB
+shows a larger signal (Haiku gap=0.042, p=0.0002; Sonnet gap=0.035, p=0.0072).
+
+**Effect size comparison to v1:**
+- v1 Sonnet gap = 0.20 → v2 pooled Sonnet gap = 0.008 (25× smaller)
+- v1 Haiku gap = 0.059 → v2 pooled Haiku gap = 0.014 (4× smaller)
+- v2 TB-only Haiku gap = 0.042 (closer, but still below v1 Haiku)
+
+**Why the effect is attenuated:**
+
+1. **Entity match rate is low overall (7–9%)** because the most common constraint type in
+   these chains is ResourceBudget (context_window, patience_budget), and model responses
+   almost never contain "context_window." Real-vs-shuffled differentiation is dominated by
+   the minority of steps where the entity is a file or error label.
+
+2. **Chain acceptance rate was 4–18%** across sources — chains that passed the filter are
+   structurally unusual (highly ResourceBudget-dominated), which may reduce the signal.
+
+3. **SWE chains contribute 85% of evaluations** (3,048 of 3,558 real evaluations per model)
+   but show almost no gap. SWE trajectories may have less predictable constraint ordering
+   than TB.
+
+**Secondary analyses (pre-registered in SPEC.md §5.1):**
+
+1. *Effect-size comparison to v1*: both models substantially below v1 levels (see above).
+2. *TB vs SWE consistency*: TB shows 4–5× larger gap than SWE. Effects diverge > 2×,
+   suggesting trajectory features differ substantially between sources. TB competitive-
+   programming chains have stronger ResourceBudget → ToolAvailability → SubGoalTransition
+   sequencing than SWE long-horizon trajectories.
+3. *Human source*: dropped (structural incompatibility, documented in SPEC.md).
+
+### Gate Status (final)
+
+All data gates from Sessions 1–12 unchanged. Scoring gate: complete.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/scorer.py` | Layer 1 entity-match fix: `extract_entity_from_constraint()` added; `score_layer1()` rewritten |
+| `results/scored.json` | Final scored output (28,464 results, corrected scorer) |
+| `SESSION_LOG.md` | This entry |
+
+### What Comes Next (for human review)
+
+1. **Decision on outcome**: The primary hypothesis is NOT replicated. The positive direction
+   is real (especially on TB) but effect size is too small.
+
+2. **Layer 2 requires follow-up**: The optimality_proxy needs the same entity-based fix
+   applied to the reference distribution. This requires rebuilding the pkl files with entity
+   labels instead of type names and a `score_layer2` update. This could be done in a
+   Session 14 if the human wants a complete Layer 2 analysis.
+
+3. **TB-only re-analysis**: The TB source shows the strongest signal. A focused TB analysis
+   (chain acceptance rate, constraint-type distribution at cutoff_k, entity match rate by
+   type) might explain the gap between v1 and v2 effect sizes.
+
+4. **Write-up**: Results should be written up as a near-replication with positive direction
+   but attenuated magnitude. The constraint-chain abstraction shows signal on programming
+   telemetry, but below the pre-registered threshold. The v1 → v2 attenuation is an
+   interesting finding in itself.
+

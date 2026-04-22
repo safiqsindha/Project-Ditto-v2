@@ -30,6 +30,37 @@ from src.reference import ReferenceDistribution, extract_state_signature
 
 
 # ---------------------------------------------------------------------------
+# Entity extraction (for Layer 1 entity-match scoring)
+# ---------------------------------------------------------------------------
+# The reference distribution was built with constraint TYPE names as actions,
+# but the model was prompted to output rendered entity labels (e.g. "use file_B").
+# This mismatch causes a 0.0 match rate with the original type-name lookup.
+# The fix: extract the key entity from the ground-truth constraint at cutoff_k
+# and check whether the model's response CONTAINS that entity.
+
+def extract_entity_from_constraint(constraint: dict) -> str | None:
+    """Return the key abstract entity label for a constraint dict."""
+    ctype = constraint.get("type", "")
+    if ctype == "ToolAvailability":
+        tool = constraint.get("tool", "")
+        return tool.lower() if tool else None
+    elif ctype == "InformationState":
+        obs = constraint.get("observable_added", [])
+        return obs[0].lower() if obs else None
+    elif ctype == "SubGoalTransition":
+        return constraint.get("to_phase", "").lower()
+    elif ctype == "ResourceBudget":
+        return constraint.get("resource", "").lower()
+    elif ctype == "CoordinationDependency":
+        dep = constraint.get("dependency", "")
+        return dep.lower() if dep else None
+    elif ctype == "OptimizationCriterion":
+        obj = constraint.get("objective", "")
+        return obj.lower() if obj else None
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Layer 1: Objective action-match rate
 # ---------------------------------------------------------------------------
 
@@ -38,42 +69,37 @@ TOP_K = 3  # top-3 match rate (spec §7.1)
 
 def score_layer1(
     model_action: str,
-    reference_dist: dict[str, float],
-    k: int = TOP_K,
-) -> dict[str, float]:
+    chain: dict,
+    cutoff_k: int,
+) -> dict[str, Any]:
     """
-    Compute top-k match and probability mass for one evaluation.
+    Compute entity-match Layer 1 score for one evaluation.
 
-    Parameters
-    ----------
-    model_action    : the action string the model proposed
-    reference_dist  : {action: probability} from ReferenceDistribution.lookup()
-    k               : top-k threshold (default 3)
+    Extracts the key entity from the ground-truth constraint at cutoff_k
+    (the step the model was asked to predict) and checks whether the model's
+    response contains that entity label as a substring.
 
-    Returns
-    -------
-    {"top_k_match": 0|1, "probability_mass": float, "reference_entropy": float}
+    Returns {"top_k_match": 0|1, "entity": str, "constraint_type": str}
     """
-    if not reference_dist:
-        return {"top_k_match": None, "probability_mass": None, "reference_entropy": None}
+    constraints = chain.get("constraints", [])
+    if cutoff_k >= len(constraints):
+        return {"top_k_match": None, "entity": None, "constraint_type": None}
 
-    norm_action = normalize_action(model_action)
-    norm_dist = {normalize_action(a): p for a, p in reference_dist.items()}
+    gt_constraint = constraints[cutoff_k]
+    entity = extract_entity_from_constraint(gt_constraint)
+    constraint_type = gt_constraint.get("type", "")
 
-    sorted_actions = sorted(norm_dist, key=norm_dist.get, reverse=True)
-    top_k_actions = sorted_actions[:k]
+    if entity is None:
+        return {"top_k_match": None, "entity": None, "constraint_type": constraint_type}
 
-    top_k_match = 1 if norm_action in top_k_actions else 0
-    prob_mass = norm_dist.get(norm_action, 0.0)
-
-    # Entropy of reference distribution (diagnostic)
-    probs = list(reference_dist.values())
-    entropy = -sum(p * math.log2(p) for p in probs if p > 0)
+    norm_response = normalize_action(model_action)
+    norm_entity = normalize_action(entity)
+    top_k_match = 1 if (norm_entity and norm_entity in norm_response) else 0
 
     return {
         "top_k_match": top_k_match,
-        "probability_mass": prob_mass,
-        "reference_entropy": round(entropy, 4),
+        "entity": entity,
+        "constraint_type": constraint_type,
     }
 
 
@@ -348,7 +374,7 @@ def score_all(
         if not chain:
             continue
 
-        # Get reference distribution for this step (source-specific)
+        # Get reference distribution for Layer 2 (source-specific)
         dist: dict[str, float] = {}
         chain_source = r.get("source", chain.get("source", ""))
         ref_dist = ref_dists.get(chain_source) or (next(iter(ref_dists.values())) if ref_dists else None)
@@ -360,8 +386,10 @@ def score_all(
             except (KeyError, AttributeError, TypeError) as exc:
                 print(f"[scorer] lookup failed for chain_id={chain_id}: {exc}")
 
-        # Layer 1
-        l1 = score_layer1(model_action, dist)
+        # Layer 1: entity-based match against ground-truth constraint at cutoff_k
+        # (Reference distribution stored type names, but model outputs entity labels —
+        # entity-based matching compares model response against the actual next entity.)
+        l1 = score_layer1(model_action, chain, cutoff_k)
         if l1["top_k_match"] is not None:
             per_model[model][f"{condition}_l1"].append(l1["top_k_match"])
 

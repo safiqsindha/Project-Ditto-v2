@@ -391,3 +391,88 @@ All code is implemented and tested.  Session 8 is the human-action session:
    T-code-v1.0-frozen` from a credentialed shell.
 
 ---
+
+## Session 8 — 2026-04-22
+
+### Tasks Completed
+
+- **Data Acquisition — Terminal-Bench 2.0 (Gate 1 PASS)**
+  - Pivoted from empty `harborframework/terminal-bench-2-leaderboard` to ATIF-format datasets:
+    `mlfoundations-dev/terminal-bench-traces-local` (1189 records),
+    `DCAgent/claude-sonnet-4-5-terminal-bench-2`, and two additional DCAgent datasets
+  - Added ATIF-format parser (`parse_atif_record`) to `scripts/acquire_tb.py`:
+    extracts shell commands from JSON keystrokes in assistant turns; infers outcome from
+    `is_task_complete` flag and test-result patterns in terminal output
+  - Added observation-based test detection: retroactively classifies last command in a
+    batch as `test_run` when the next terminal output contains pass/fail patterns
+  - Combined 890 usable trajectories from four ATIF datasets → **Gate 1 PASS (890 ≥ 400)**
+
+- **Data Acquisition — SWE-bench Verified (Gate 2 PASS)**
+  - Pivoted from non-existent `princeton-nlp/SWE-bench_trajectories` to nebius format:
+    `nebius/SWE-agent-trajectories` (80K records)
+  - Added nebius-format converter (`_convert_nebius_to_swe`) to `scripts/acquire_swe.py`:
+    extracts actions from AI-turn code blocks; maps `target` bool to SWE outcome
+  - Added JetBrains format converter for additional coverage
+  - Added observation-based test detection to `src/parser_swe.py`:
+    `_OBS_TEST_PASS_RE` / `_OBS_TEST_FAIL_RE` classify commands as `test_run`
+    when observation contains test-result text
+  - 500 trajectories saved → **Gate 2 PASS (500 ≥ 400)**
+
+- **Chain Building — TB (Gate 3 PASS)**
+  - Fixed chain ID collision bug: same `task_id` across different model runs caused file
+    overwrites; fixed by using `f"{source}_{record_idx:04d}_{task_id}"` as chain_id
+  - Added chain length truncation (`_MAX_LEN = 40`) after observability filter
+  - TB: 890 trajectories → 43 accepted → 61 unique chain files
+  - **Gate 3 TB PASS: 61 chains, 20 checked — no leakage**
+
+- **Chain Building — SWE (Gate 3 PASS)**
+  - 500 trajectories → 92 accepted → 121 unique chain files
+  - **Gate 3 SWE PASS: 121 chains, 20 checked — no leakage**
+
+- **Human Sessions — Acquisition in progress (Gate 2c pending)**
+  - `scripts/acquire_human.py` running with GITHUB_TOKEN from `gh auth token`
+  - Searches SpecStory `.specstory/history/*.md` files via GitHub Code Search API
+  - Target: ≥ 100 sessions with ≥ 15 events (Gate 2c threshold)
+
+### Python Version Issue & Fix
+
+- `src/translation.py` uses Python 3.10+ union syntax (`A | B | C`) — T-code frozen, cannot edit
+- Installed Python 3.11 via `brew install python@3.11`
+- All pipeline scripts now run with `/opt/homebrew/bin/python3.11`
+
+### Gate Status
+
+| Gate | Requirement | Status |
+|------|-------------|--------|
+| Gate 1 | ≥ 400 TB trajectories | **PASS** (890) |
+| Gate 2 | ≥ 400 SWE trajectories | **PASS** (500) |
+| Gate 2c | ≥ 100 human sessions | **PENDING** (acquisition in progress) |
+| Gate 3 TB | ≥ 20 chains, no leakage | **PASS** (61 chains) |
+| Gate 3 SWE | ≥ 20 chains, no leakage | **PASS** (121 chains) |
+| Gate 3 Human | ≥ 20 chains, no leakage | **PENDING** |
+
+### Deviations from Plan
+
+- **TB dataset changed**: Used ATIF-format mlfoundations/DCAgent datasets instead of
+  inspect-ai eval logs (latter format not publicly available for Terminal-Bench 2.0)
+- **SWE dataset changed**: Used nebius/SWE-agent-trajectories instead of
+  princeton-nlp/SWE-bench_trajectories (latter dataset does not exist on HuggingFace)
+- **chain_id format changed**: Added `record_idx` prefix to prevent overwrite collisions;
+  not a methodology change, only affects file naming
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `scripts/acquire_tb.py` | Added ATIF format parser + observation-based test detection |
+| `scripts/acquire_swe.py` | Added nebius + JetBrains format converters |
+| `scripts/build_chains.py` | Fixed chain_id collision; added truncation; fixed double translate call |
+| `src/parser_swe.py` | Added observation-based test detection |
+| `data/terminal_bench/trajectories.jsonl` | Generated (890 trajectories) |
+| `data/swe_bench_verified/trajectories.jsonl` | Generated (500 trajectories) |
+| `chains/real/tb/` | 43 real chain files |
+| `chains/real/swe/` | 92 real chain files |
+| `chains/shuffled/tb/` | Shuffled variants (seeds 42, 1337, 7919) |
+| `chains/shuffled/swe/` | Shuffled variants (seeds 42, 1337, 7919) |
+
+---

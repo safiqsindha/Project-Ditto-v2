@@ -153,6 +153,7 @@ def process_trajectory(
     out_real: Path,
     out_shuffled: Path,
     verbose: bool = False,
+    record_idx: int = 0,
 ) -> tuple[bool, str]:
     """
     Run the full pipeline for one trajectory record.
@@ -182,10 +183,6 @@ def process_trajectory(
 
     # 4. Asymmetric observability
     try:
-        constraints = apply_asymmetric_observability(constraints)
-        # active_pairs indexed from original constraints; rebuild to match filtered set
-        # (observability filter may drop some constraints, so pairs must be re-aligned)
-        # apply_asymmetric_observability_with_indices gives us the kept indices
         from src.observability import apply_asymmetric_observability_with_indices
         constraints, kept_indices = apply_asymmetric_observability_with_indices(
             translate_trajectory(agg_events, source)[0]
@@ -193,6 +190,14 @@ def process_trajectory(
         active_pairs = [active_pairs[i] for i in kept_indices]
     except Exception as exc:
         return False, f"observability_error:{exc}"
+
+    # 4b. Truncate to spec max length (20-40 constraints).
+    # Chains longer than 40 are trimmed to their first 40 constraints;
+    # this preserves temporal order and the opening sub-goal structure.
+    _MAX_LEN = 40
+    if len(constraints) > _MAX_LEN:
+        constraints = constraints[:_MAX_LEN]
+        active_pairs = active_pairs[:_MAX_LEN]
 
     # 5. Filter
     if not is_valid_chain(constraints):
@@ -207,7 +212,9 @@ def process_trajectory(
         return False, f"render_error:{exc}"
 
     # 7. Save real chain
-    chain_id = f"{source}_{task_id}"
+    # Include record_idx to avoid collisions when multiple trajectories share
+    # the same task_id (e.g., same task evaluated under different models).
+    chain_id = f"{source}_{record_idx:04d}_{task_id}"
     chain_dict = _chain_to_dict(
         chain_id=chain_id,
         source=source,
@@ -339,7 +346,8 @@ def main() -> None:
     for i, record in enumerate(records):
         task_id = record.get("task_id", f"idx_{i}")
         success, reason = process_trajectory(
-            record, args.source, out_real, out_shuffled, verbose=args.verbose,
+            record, args.source, out_real, out_shuffled,
+            verbose=args.verbose, record_idx=i,
         )
         if success:
             stats["accepted"] += 1

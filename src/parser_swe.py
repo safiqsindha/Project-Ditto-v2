@@ -69,6 +69,26 @@ _EDITOR_CMD_RE = re.compile(
 _PASS_STATUS = frozenset({"submitted", "exit_cost", "exit_format"})
 _FAIL_STATUS = frozenset({"early_exit", "exit_context", "autosubmission_failed"})
 
+# Observation-based test-result detection (catches non-pytest test runners)
+_OBS_TEST_PASS_RE = re.compile(
+    r"(\d+\s+passed(?:\s+in\s+[\d.]+s)?"
+    r"|\bOK\b"
+    r"|all\s+tests?\s+pass(?:ed)?"
+    r"|PASSED"
+    r"|Tests\s+run:\s*\d+,\s*Failures:\s*0"
+    r"|TEST_\w+:\s*PASS)",
+    re.IGNORECASE,
+)
+_OBS_TEST_FAIL_RE = re.compile(
+    r"(\d+\s+failed"
+    r"|\bFAILED\b"
+    r"|ERRORS\b"
+    r"|AssertionError"
+    r"|Tests\s+run:\s*\d+.*Failures:\s*[1-9]"
+    r"|TEST_\w+:\s*FAIL)",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -112,6 +132,13 @@ def _parse_action_obs_steps(steps: list[dict]) -> list[TrajectoryEvent]:
             continue
 
         evt_type = _classify_swe_command(action)
+
+        # Override to test_run if observation contains test-result evidence,
+        # even if the command text doesn't look like a standard test runner
+        # (e.g. "python reproduce.py", "bash tests/test.sh", "Rscript -e test()").
+        if evt_type in ("bash_call", "file_read") and observation:
+            if _OBS_TEST_PASS_RE.search(observation) or _OBS_TEST_FAIL_RE.search(observation):
+                evt_type = "test_run"
 
         if evt_type == "test_run":
             evt = TrajectoryEvent(

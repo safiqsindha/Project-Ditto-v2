@@ -13,17 +13,21 @@ Source formats accepted
 -----------------------
 - Local directory of .json / .jsonl trajectory files
 - Local .jsonl file (one SWE-agent trajectory per line)
-- HuggingFace dataset ID (e.g. "princeton-nlp/SWE-agent-trajectories")
+- HuggingFace dataset ID (SWE-agent Format A: action/observation steps)
+- HuggingFace dataset ID (nebius format: trajectory list with role/text turns)
+  e.g. "nebius/SWE-agent-trajectories"
+- HuggingFace dataset ID (chat-messages format)
+  e.g. "JetBrains-Research/agent-trajectories-swe-bench-test-minus-verified"
+
+Format auto-detection
+---------------------
+Records with a "trajectory" key whose turns have a "text" field (and role
+"ai") are treated as nebius format.  Records with "traj" (action/observation
+steps) or "messages" (chat format) use the existing SWE parser directly.
 
 Recommended HuggingFace source
 -------------------------------
-SWE-agent trajectories for SWE-bench Verified are available as separate
-prediction submission datasets.  Known public datasets include:
-  - "SWE-bench/trajectories"
-  - "princeton-nlp/SWE-bench_Verified"  (task descriptions only, not trajectories)
-
-If you have a local directory of SWE-agent trajectory JSON files (one file per
-instance), pass the directory path as --source.
+  nebius/SWE-agent-trajectories  (80K records, SWE-agent, has resolved label)
 
 Gate 2 check
 ------------
@@ -35,12 +39,141 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.parser_swe import filter_trajectory, parse_swe_trajectory, TrajectoryLog
+
+
+# ---------------------------------------------------------------------------
+# Nebius format converter
+# ---------------------------------------------------------------------------
+
+_CODE_BLOCK_RE = re.compile(r"```(?:\w+)?\n?(.*?)\n?```", re.DOTALL)
+
+
+def _extract_action_from_ai_turn(text: str) -> str:
+    """Extract the shell command from an AI turn's ``` code block."""
+    m = _CODE_BLOCK_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    # Fall back: last non-empty line of thought text (no code block)
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    return lines[-1] if lines else ""
+
+
+def _is_nebius_record(raw: dict) -> bool:
+    """Return True if this is a nebius/SWE-agent-trajectories format record."""
+    traj = raw.get("trajectory")
+    if not isinstance(traj, list) or not traj:
+        return False
+    first = traj[0] if isinstance(traj[0], dict) else {}
+    # Nebius turns have "text" and "role" keys (role can be "ai"); no "action" key
+    return "text" in first and "action" not in first
+
+
+def _convert_nebius_to_swe(raw: dict) -> dict:
+    """
+    Convert a nebius/SWE-agent-trajectories record to SWE-agent Format A.
+
+    The nebius format uses role=system/user/ai turns with a "text" field.
+    We extract (action, observation) pairs from consecutive ai→user turn pairs
+    and map them to Format A's action/observation step list.
+    """
+    trajectory = raw.get("trajectory", [])
+
+    steps: list[dict] = []
+    pending_action: str | None = None
+
+    for turn in trajectory:
+        if not isinstance(turn, dict):
+            continue
+        role = turn.get("role", "")
+        text = turn.get("text") or ""
+
+        if role == "ai":
+            action = _extract_action_from_ai_turn(text)
+            if action:
+                pending_action = action
+
+        elif role == "user" and pending_action is not None:
+            steps.append({"action": pending_action, "observation": text})
+            pending_action = None
+
+    # Map target (bool) to exit_status the SWE parser understands
+    resolved = raw.get("target", False)
+    exit_status = "submitted" if resolved else "early_exit"
+
+    return {
+        "instance_id": raw.get("instance_id", "unknown"),
+        "model_name_or_path": raw.get("model_name", "unknown"),
+        "agent": raw.get("agent", "swe-agent"),
+        "traj": steps,
+        "info": {"exit_status": exit_status},
+    }
+
+
+def _is_jetbrains_record(raw: dict) -> bool:
+    """Return True if this is a JetBrains chat-messages format record."""
+    msgs = raw.get("messages")
+    return (
+        isinstance(msgs, list)
+        and bool(msgs)
+        and isinstance(msgs[0], dict)
+        and "role" in msgs[0]
+        and "content" in msgs[0]
+        and "instance_id" in raw
+    )
+
+
+def _convert_jetbrains_to_swe(raw: dict) -> dict:
+    """Convert JetBrains agent-trajectories record to SWE Format A."""
+    messages = raw.get("messages", [])
+    steps: list[dict] = []
+    pending_action: str | None = None
+
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "") or ""
+
+        if role == "assistant":
+            # Extract bash command from code block
+            m = _CODE_BLOCK_RE.search(content)
+            if m:
+                pending_action = m.group(1).strip()
+            elif content.strip():
+                # No code block — take the full text as action
+                pending_action = content.strip()
+
+        elif role == "user" and pending_action is not None:
+            steps.append({"action": pending_action, "observation": content})
+            pending_action = None
+
+    resolved = raw.get("resolved")
+    exit_status_raw = str(raw.get("exit_status", "")).lower()
+    if resolved is True:
+        exit_status = "submitted"
+    elif resolved is False:
+        exit_status = "early_exit"
+    elif "submitted" in exit_status_raw:
+        exit_status = "submitted"
+    else:
+        exit_status = "early_exit"
+
+    return {
+        "instance_id": raw.get("instance_id", "unknown"),
+        "model_name_or_path": (
+            raw.get("selected_models", ["unknown"])[0]
+            if raw.get("selected_models")
+            else "unknown"
+        ),
+        "agent": "swe-agent",
+        "traj": steps,
+        "info": {"exit_status": exit_status},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +211,6 @@ def _iter_file(fp: Path):
             if isinstance(data, list):
                 yield from data
             elif isinstance(data, dict):
-                # Single trajectory file (one JSON object per file)
                 yield data
 
 
@@ -160,12 +292,25 @@ def main() -> None:
     usable: list[TrajectoryLog] = []
     total_seen = 0
     total_parse_errors = 0
+    nebius_count = 0
+    jetbrains_count = 0
+    native_count = 0
 
     print(f"Reading from: {args.source}")
     for raw in _iter_source(args.source):
         total_seen += 1
         try:
-            log = parse_swe_trajectory(raw)
+            if _is_nebius_record(raw):
+                converted = _convert_nebius_to_swe(raw)
+                log = parse_swe_trajectory(converted)
+                nebius_count += 1
+            elif _is_jetbrains_record(raw):
+                converted = _convert_jetbrains_to_swe(raw)
+                log = parse_swe_trajectory(converted)
+                jetbrains_count += 1
+            else:
+                log = parse_swe_trajectory(raw)
+                native_count += 1
         except (ValueError, KeyError, TypeError) as exc:
             total_parse_errors += 1
             if total_parse_errors <= 5:
@@ -186,6 +331,9 @@ def main() -> None:
         f"\nSummary:"
         f"\n  Records examined : {total_seen}"
         f"\n  Parse errors     : {total_parse_errors}"
+        f"\n  Nebius format    : {nebius_count}"
+        f"\n  JetBrains format : {jetbrains_count}"
+        f"\n  Native SWE format: {native_count}"
         f"\n  Usable saved     : {len(usable)}"
         f"\n  Output file      : {out_file}"
     )

@@ -647,3 +647,63 @@ rate for TB and ~18% for SWE means per-source power is low; pooling was always p
 | `data/reference_swe.pkl` | Built (3,485 keys, 100% coverage) |
 
 ---
+
+## Session 12 — 2026-04-22 — Full Evaluation
+
+### Tasks Completed
+
+- **Pre-flight review** caught 3 bugs before running:
+  1. `runner.py`: batch overflow — SWE shuffled alone = 18,288 requests > 10,000 limit. Fixed with chunked submission (`_MAX_BATCH_SIZE = 10_000`).
+  2. `runner.py`: `custom_id` format violation — Batches API requires `^[a-zA-Z0-9_-]{1,64}$`. Original format used `|` and `.`. Fixed with sequential `req{idx:07d}` IDs + full metadata in `meta` dict.
+  3. `scorer.py`: `glob("*.json")` misses result files in subdirs. Fixed with `glob("**/*.json")`.
+  4. `scorer.py`: single `--dist` flag couldn't handle TB + SWE separate reference dists. Fixed with `--dist-tb`/`--dist-swe`/`--dist-human` + source routing.
+
+- **Full evaluation completed** — all 28,464 requests succeeded:
+  - TB real: 1,020 (170 chains × 2 models × 3 configs)
+  - TB shuffled: 3,060 (510 chains × 6)
+  - SWE real: 6,096 (1,016 chains × 6)
+  - SWE shuffled: 18,288 (3,048 chains × 6)
+  - Note: mid-run credit exhaustion caused 5,001 errors in first pass; second pass completed all missing files.
+
+- **Data validation** confirmed:
+  - 0 empty responses across 28,464 files
+  - 20/20 sampled chain_id linkages valid
+  - All 6 model/seed/temp configs present
+  - `source` field correctly set for reference distribution routing
+
+- **scorer.py bug fixed post-run**: chain indexing used `glob("*.jsonl")` instead of `glob("**/*.jsonl")` — chains live in subdirectories (`chains/real/tb/`, `chains/real/swe/`). Fixed before Session 13.
+
+- **`results/scored.json` deleted** — accidental scorer run produced empty output (due to above bug). Scorer must be re-run in Session 13.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `src/runner.py` | Batch chunking, sequential custom_id, metadata dict |
+| `src/scorer.py` | Recursive glob for results + chains; multi-source dist routing; chain indexing fix |
+| `results/raw/tb/` | 4,080 result files |
+| `results/raw/swe/` | 24,384 result files |
+| `results/blinded/` | 4,744 blinded files |
+
+### What Session 13 Must Do
+
+Run scoring in a **fresh Claude Code session** with no access to model identity context:
+
+```bash
+cd "/Users/safiqsindha/Ditto v2"
+python3.11 -m src.scorer \
+  --results results/raw/ \
+  --dist-tb data/reference_tb.pkl \
+  --dist-swe data/reference_swe.pkl \
+  --chains-real chains/real/ \
+  --chains-shuffled chains/shuffled/ \
+  --out results/scored.json
+```
+
+Then read and interpret `results/scored.json` against SPEC.md thresholds.
+
+### Blockers / Notes for Human Review
+
+- Human source remains dropped (Gate 2c FAIL — structural). Pooled TB+SWE is primary test.
+- All evaluation data is local (not in git — 111MB raw + 59MB chains).
+

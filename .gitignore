@@ -16,3 +16,11 @@ data/tb_gpt5*/
 data/tb_sera*/
 data/tb_r2egym/
 data/terminal_bench_combined/
+
+# Large local data — not tracked in git
+results/raw/
+results/blinded/
+results/scored.json
+chains/real/
+chains/shuffled/
+.claude/

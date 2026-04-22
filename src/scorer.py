@@ -319,11 +319,11 @@ def score_all(
 
     # Index chains for fast lookup
     chain_index: dict[str, dict] = {}
-    for cfile in chains_real_dir.glob("*.jsonl"):
+    for cfile in chains_real_dir.glob("**/*.jsonl"):
         with open(cfile) as f:
             chain = json.loads(f.readline())
             chain_index[chain["chain_id"]] = chain
-    for cfile in chains_shuffled_dir.glob("*.jsonl"):
+    for cfile in chains_shuffled_dir.glob("**/*.jsonl"):
         with open(cfile) as f:
             chain = json.loads(f.readline())
             chain_index[chain["chain_id"]] = chain

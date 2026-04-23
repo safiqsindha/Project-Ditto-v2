@@ -1261,3 +1261,68 @@ LFS. The error-analysis output (`supplementary/error_analysis/*.jsonl`,
    resolvable.
 3. Human review of the three new PROPOSED_CHANGES.md proposals before
    any incorporation into a finalised RESULTS.md / WRITEUP.md.
+
+---
+
+## Methodological Review — 2026-04-23
+
+### Issues Identified
+
+Four methodological issues were identified in `src/scorer.py`:
+
+1. **Unpaired test for Layer 1:** Two-sample proportion test was used, but
+   data is paired (each real chain has corresponding shuffled variants with
+   the same base content). McNemar's test is the correct paired test for
+   binary match/no-match outcomes.
+
+2. **Unpaired test for Layer 2:** Welch's t-test was used, but data is
+   paired. Paired t-test (scipy.stats.ttest_rel) is correct.
+
+3. **No (chain_id, seed) alignment:** The scorer did not enforce that each
+   real evaluation had a corresponding shuffled evaluation before computing
+   rates. Missing pairs could cause unmatched sample comparison.
+
+4. **No multiple-comparisons correction:** Many breakdown slices were tested
+   at α = 0.05 without family-wise error rate control. Bonferroni correction
+   is needed across the 4 primary cells.
+
+### Actions Taken
+
+- `src/scorer_corrected.py` created (original `src/scorer.py` unchanged)
+- `results/scored_corrected.json` produced by running corrected scorer
+  against existing `results/raw/` (no new API calls)
+- `CORRECTED_SCORING.md` written with full side-by-side comparison
+
+### Key Findings from Corrected Scoring
+
+1. **Pair alignment (Issue 3):** 0 pairs excluded. All 28,464 results were
+   perfectly paired. Issue 3 had no impact on the actual results.
+
+2. **Layer 1 all-cutoffs (Issue 1):** Gaps unchanged. McNemar p-values
+   differ from original z-test: haiku::swe changes from p=0.069 (NS) to
+   p=0.005 (S); all other directional conclusions unchanged.
+
+3. **Layer 1 actionable (Issue 1 + design difference):** LARGE gap increase
+   for TB cells (0.066→0.115 haiku::tb, 0.031→0.115 sonnet::tb). This is
+   NOT a bug — it reflects a different paired estimand. The corrected paired
+   test compares real-actionable positions vs. shuffled counterfactual at the
+   same positions (where shuffled chains often have non-actionable constraints),
+   whereas the original compared separately filtered real-actionable vs.
+   shuffled-actionable samples. Co-author review required — see
+   CORRECTED_SCORING.md §"FLAG FOR CO-AUTHOR REVIEW."
+
+4. **Layer 2 (Issue 2):** Gaps unchanged. Paired t-test gives larger
+   t-statistics (more powerful). All four primary cells remain p < 0.0001.
+
+5. **Bonferroni (Issue 4):** With ×4 correction on the 4 primary cells,
+   haiku::tb and sonnet::tb both clear the pre-registered threshold (gap≥0.05,
+   corrected p<0.0001). The pre-registered minimum publishable criterion
+   (at least one cell meets threshold) is MET. This is the same conclusion
+   as the original, but is now also met by sonnet::tb (which was not significant
+   in the original). Both conclusions carry the estimand caveat for actionable L1.
+
+### PRIMARY RESULTS NOT YET UPDATED
+
+`RESULTS.md` has NOT been modified. The corrected scoring findings are in
+`CORRECTED_SCORING.md` for co-author review. Co-authors must decide on the
+actionable L1 estimand question before updating primary artifacts.

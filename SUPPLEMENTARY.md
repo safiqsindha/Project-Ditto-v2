@@ -159,16 +159,197 @@ fewer context constraints for Sonnet to leverage.
 
 ## §3 Error Analysis
 
-**Script:** `scripts/supplementary/03_error_analysis.py`  
-**Output:** `supplementary/error_analysis/_status.json`
+**Script:** `scripts/supplementary/03_error_analysis.py`
+**Output:** `supplementary/error_analysis/*.jsonl` (16 files, 320 cases)
+**Run date:** 2026-04-23 (rerun after `results/raw/` made accessible locally)
 
-**Status: Cannot run.** `results/raw/` was not committed to this repository. The script
-exits gracefully and documents the expected format. To enable this analysis, push
-`results/raw/` from the local evaluation machine and re-run the script.
+**Raw responses:** the per-chain response files in `results/raw/` (28,465
+JSON files, ~111 MB) are not tracked in this repository. The error-analysis
+output JSONL files in `supplementary/error_analysis/` contain the sampled
+cases referenced by chain-id in §3.3, §3.7, etc.; full raw responses are
+available from the authors on request (language for final paper TBD —
+likely a HuggingFace dataset release).
 
-Expected output: 16 JSONL files (4 cells × 2 conditions × match/fail), each with 20
-sampled cases including model response, ground-truth entity, constraint type at cutoff,
-5-constraint context window, and a qualitative annotation.
+### §3.1 Sampling methodology
+
+- 16 cells = 2 models × 2 sources × 2 conditions × 2 outcomes (match / fail)
+- 20 cases sampled per cell with `random.Random(seed=42)`
+- Each case records: `chain_id`, `model`, `source`, `condition`, `model_response`,
+  `ground_truth_entity`, `constraint_type_at_cutoff`, the 5 constraints immediately
+  preceding the cutoff (`last_5_constraints`), and the binary `match` flag
+- Match logic uses the same entity substring containment as the primary scorer
+  (`normalize_action(entity) in normalize_action(response)`)
+- Sampled cells are read-only views over `results/raw/`; no re-scoring is performed
+
+A small bug was fixed before run: the script's bucket dict was pre-filled with
+keys `shuf_match`/`shuf_fail` while the runtime constructed
+`shuffled_match`/`shuffled_fail`. Renamed dict keys; no semantic change.
+
+### §3.2 Cell-level composition
+
+The most informative cut is by *constraint type at the cutoff*, since this
+determines what the model is asked to predict and what fallback patterns are
+available.
+
+| Cell (n=20) | Match: dominant GT type | Fail: dominant GT type |
+|---|---|---|
+| haiku::tb real | **ToolAvailability 12 / IS 6 / RB 2** | RB 9 / SubGoal 4 / TA 3 |
+| haiku::swe real | **InformationState 13 / CD 4 / TA 3** | RB 12 / TA 5 / IS 2 / CD 1 |
+| sonnet::tb real | **ToolAvailability 16 / IS 4** | RB 13 / TA 4 / SubGoal 2 / IS 1 |
+| sonnet::swe real | **InformationState 10 / CD 6 / TA 4** | RB 10 / TA 7 / SubGoal 1 / IS 1 / CD 1 |
+| haiku::tb shuffled | TA 12 / RB 4 / CD 2 / SubGoal 1 / IS 1 | RB 12 / TA 6 / IS 1 / CD 1 |
+| haiku::swe shuffled | IS 12 / CD 6 / TA 2 | TA 6 / RB 6 / IS 5 / SubGoal 1 / OC 1 / CD 1 |
+| sonnet::tb shuffled | TA 14 / IS 6 | RB 12 / SubGoal 4 / TA 3 / IS 1 |
+| sonnet::swe shuffled | IS 9 / CD 7 / TA 4 | TA 8 / RB 7 / IS 3 / SubGoal 1 / CD 1 |
+
+**Pattern:** in every cell, *match* cases concentrate on the carrier-type cutoffs
+(ToolAvailability for TB, InformationState for SWE) — confirming §2/§4c at the
+case level. *Fail* cases concentrate on `ResourceBudget` cutoffs (`context_window`
+GTs the model cannot emit), exactly the dilution that motivated the actionable-L1
+refinement in §5.1 of WRITEUP.md.
+
+### §3.3 Real-match vs shuffled-match — what the model is doing
+
+Comparing the 5-constraint local context preceding the cutoff in real-match
+vs shuffled-match cases gives the clearest qualitative signal.
+
+**Representative real-match (SWE-Sonnet, `swe_1254_glotzerlab__signac-323`):**
+local context is `RB(patience) → TA(test_suite) → TA(file_B) →
+CoordinationDependency(error_class_B) → RB(context_window)` and GT at K is
+`InformationState → error_class_b`. The model emits `resolve_error_class_B` and
+matches. The CoordinationDependency on `error_class_B` two steps before the
+cutoff sets up the prediction — local context is doing real work.
+
+**Representative shuffled-match (SWE-Sonnet, `swe_1272_googleapis__python-api-core-546_shuffled_7919`):**
+local context is `TA(file_C) → TA(test_suite) → IS(error_class_A) → TA(file_C)
+→ SubGoalTransition(debugging)` and GT at K is `ToolAvailability → file_b`. The
+model emits `use file_B to resolve_error_class_B`. The match is a substring hit
+on `file_B`, but nothing in the local context predicts file_B — the model says
+file_B because it says file_B in many of its responses regardless of context.
+
+This contrast holds across the sample: *real matches use local context; shuffled
+matches are alignments between the model's default-guess vocabulary and the
+constraint that randomly landed at the cutoff*. The constraint-chain hypothesis
+predicts exactly this asymmetry.
+
+### §3.4 Real-fail vs shuffled-fail — symmetric in mode, different in source
+
+Failure modes are very similar across real and shuffled within a source, and
+sharply different between sources:
+
+| Source | Most common failure-response prefix (real / shuffled fails pooled across models) |
+|---|---|
+| TB | `switch to …` (phase transition), `use file_A`/`use file_C` (default file guess) |
+| SWE | `resolve_error_class_B` (default error guess), `use file_B`/`use file_C` |
+
+Two source-specific *fallback strategies* emerge:
+
+- **TB fallback = phase transition.** When the model can't predict the next
+  constraint (typically because GT is a `ResourceBudget(context_window)`), it
+  emits a phase-shift response: `switch to debugging`, `switch to validation`.
+  This appears in 10/20 TB-Haiku-real-fails and 12/20 TB-Haiku-shuffled-fails.
+- **SWE fallback = error resolution.** Same scenario, but the model emits
+  `resolve_error_class_B`. This appears in 9/20 SWE-Haiku-real-fails and
+  7/20 SWE-Haiku-shuffled-fails.
+
+The fallback is symmetric across real/shuffled within a source — the model is
+not failing differently on real vs shuffled chains; it's failing the same way
+on the same vacuous-cutoff cases. This is consistent with the actionable-L1
+refinement story: vacuous cutoffs do not differentiate the conditions.
+
+### §3.5 TB vs SWE failure modes
+
+The previous subsection isolates the source-specific fallback. Why does it
+differ? SWE chains carry roughly twice the share of `InformationState` (13%
+vs 10%) and 4× the share of `CoordinationDependency` (9% vs 2%) constraints,
+both of which involve `error_class_X` entities. The model conditions on this
+context and emits error-resolution responses. TB has roughly twice the share
+of `SubGoalTransition` constraints (10% vs 6%) and a higher proportion of
+`debugging` phase entities, which prime phase-transition responses.
+
+This is descriptive; it does not say one fallback is "smarter" than the other,
+only that the model's response prior is shaped by the source's marginal
+constraint composition.
+
+### §3.6 Haiku vs Sonnet — mode-collapse asymmetry
+
+Sonnet shows stronger response mode-collapse than Haiku:
+
+- TB-Sonnet-real-matchs: `use file_a` appears in 12/20 responses; GT entities
+  are also overwhelmingly `file_a` (13/20).
+- TB-Haiku-real-matchs: `switch to …` (6/20), `resolve_error_class_a` (5/20),
+  `use file_a` (3/20), `use file_c` (3/20) — varied.
+
+Sonnet defaults more aggressively to a single high-prior action (`use file_A`
+in TB; `resolve_error_class_B` in SWE). When the GT lands on that default, it
+matches in both real and shuffled — which is the §5.3 / §4d compression
+mechanism made concrete. Haiku's more varied response distribution loses on
+"easy" cases (where the prior would have helped) but is more discriminating
+between real and shuffled, because its distribution interacts more with the
+local context.
+
+### §3.7 The ToolAvailability-SWE anomaly under the microscope
+
+This is the most important §3 finding. From SUPPLEMENTARY §2 / §4: SWE-Sonnet
+shows a *significant negative* TA gap (real 0.042 vs shuffled 0.069, p = 0.002).
+The error-analysis sample isolates the mechanism.
+
+**The 4 SWE-Sonnet shuffled-match TA cases:**
+
+| chain_id | GT entity | response | match? |
+|---|---|---|---|
+| `swe_1272_googleapis__python-api-core-546_shuffled_7919` | file_b | `use file_B to resolve_error_class_B` | ✓ |
+| `swe_3867_mplanchard__pydecor-20_shuffled_7919` | file_b | `use file_B` | ✓ |
+| `swe_3879_nathandines__SPF2IP-3_shuffled_7919` | file_c | `use file_C to resolve_error_class_A` | ✓ |
+| `swe_2843_reata__sqllineage-38_shuffled_42` | file_b | `use file_B` | ✓ |
+
+GT is file_b in 3/4 cases. The model defaults to `use file_B`. Match.
+
+**The 7 SWE-Sonnet real-fail TA cases (sampled):**
+
+| chain_id | GT entity | response |
+|---|---|---|
+| `swe_3656_iterative__dvc-2975` | file_a | `resolve_error_class_B` |
+| `swe_4064_snowblink14__smatch-30` | file_g | `use file_F` |
+| `swe_3170_ameily__cincoconfig-26` | test_suite | `resolve_error_class_B` |
+| `swe_1848_devopshq__artifactory-439` | file_a | `resolve_error_class_C` |
+| `swe_3713_iterative__dvc-4623` | file_g | `use file_F` |
+
+GT is varied (file_a, file_g, test_suite); the model misses with its defaults.
+
+**Mechanism (qualitative confirmation of §5.2 of WRITEUP.md):** SWE's
+ToolAvailability distribution is dominated by `file_B` (33% of all TA
+constraints in the source). Shuffling redistributes which constraint lands
+at the cutoff K according to the marginal distribution; real chains preserve
+the autocorrelated sequence structure, which means *real* TA cutoffs are *less*
+likely to land on the marginal mode (file_B) than shuffled TA cutoffs. The
+model's strong `file_B`/`error_class_B` default thus matches *shuffled* cases
+more often than *real* cases. The negative gap is a real artefact of marginal-
+versus-conditional distribution interaction; it is not noise.
+
+This means the SWE-TA anomaly is **explained, not removed**: the abstraction
+does carry signal in SWE-TA, but the signal goes the *wrong way* under our
+match metric because the model's default-guess prior happens to align with
+the marginal-distribution mode that shuffling exposes. A metric that
+conditioned on the *local* context distribution rather than the marginal
+would reverse the sign — but that is a methodological change, not a
+re-scoring, and is left for follow-up work.
+
+### §3.8 What this analysis cannot determine
+
+- The samples are 20 cases per cell — sufficient to characterise *patterns*
+  but not to estimate the relative weight of each pattern with precision.
+- The 5-constraint local context is a reading aid; whether the model is
+  *actually* attending to those tokens (vs. broader prompt context) cannot
+  be inferred from the responses alone.
+- The substring-match scoring metric conflates "the model intended this entity"
+  with "the model's response happens to contain the entity string". Some
+  matches are substring artefacts (e.g., `use file_B to resolve_error_class_B`
+  matches GT `error_class_b`). Section §3.3's representative real-match case
+  is robust to this; the population-level match rates are not separable.
+- The qualitative comparison between Haiku and Sonnet response style is
+  consistent with §4d's compression hypothesis but does not by itself
+  establish capability vs. response-strategy as the cause.
 
 ---
 

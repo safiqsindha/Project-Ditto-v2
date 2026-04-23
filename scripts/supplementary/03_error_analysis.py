@@ -97,7 +97,7 @@ def run_analysis(chain_index: dict[str, dict]) -> dict:
     """Sample cases and produce error analysis output."""
     raw_files = sorted(RAW_DIR.glob("**/*.json"))
     results_by_cell: dict[tuple[str, str], dict[str, list]] = defaultdict(
-        lambda: {"real_match": [], "real_fail": [], "shuf_match": [], "shuf_fail": []}
+        lambda: {"real_match": [], "real_fail": [], "shuffled_match": [], "shuffled_fail": []}
     )
 
     for f in raw_files:

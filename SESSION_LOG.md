@@ -1175,3 +1175,89 @@ No modifications to RESULTS.md §4, SPEC.md, scoring code, or reference distribu
 | `SUPPLEMENTARY.md` | Created |
 | `PROPOSED_CHANGES.md` | Created |
 | `SESSION_LOG.md` | This entry |
+
+---
+
+## Session 15b — 2026-04-23 (continuation: error analysis enabled)
+
+### Tasks Completed
+
+- Pulled remote `830fffb` into local main (supplementary analyses 1, 2, 4
+  + scripts + SUPPLEMENTARY.md + PROPOSED_CHANGES.md from prior session)
+- Verified `results/raw/` exists locally (28,465 JSON files, 111 MB) but
+  is gitignored — not pushed in `830fffb`
+- Reviewed `scripts/supplementary/03_error_analysis.py`: bucket-key bug
+  prevented runtime (dict pre-filled `shuf_match`/`shuf_fail`, code
+  produced `shuffled_match`/`shuffled_fail`)
+- Applied minimal fix (rename dict keys to use full word `shuffled`)
+- Removed stale `_status.json` placeholder
+- Ran Analysis 3 against local `results/raw/` with `PYTHONPATH=.`
+  — completed, 16 output files, 320 cases
+- Performed qualitative analysis across all 16 cells per task brief
+- Wrote SUPPLEMENTARY.md §3.1–3.8 with concrete case-ID references
+- Updated PROPOSED_CHANGES.md with three new §5 proposals based on §3
+- Did NOT modify scored.json, reference distributions, headline numbers,
+  or T-code
+
+### Findings (headline)
+
+- **Carrier-type confirmation at the case level.** Match cases concentrate
+  on TA cutoffs in TB and IS cutoffs in SWE; fail cases concentrate on
+  RB(context_window) cutoffs in both — confirms the actionable-L1 refinement
+  story.
+- **Real-match vs shuffled-match are qualitatively different.** Real
+  matches use local context (e.g., a CoordinationDependency on `error_class_B`
+  two steps before predicts the next IS as `error_class_B`). Shuffled
+  matches are alignments between the model's default vocabulary and the
+  randomly-landed marginal mode.
+- **SWE-TA anomaly mechanism confirmed.** In sampled SWE-Sonnet shuffled-
+  match TA cases, GT was `file_b` in 3/4 cases and the model's default
+  `use file_B` produced the match. In sampled real-fail TA cases, GT was
+  varied (`file_a`, `file_g`, `test_suite`) and the same defaults missed.
+  The negative gap is a real artefact of marginal-vs-conditional
+  distribution interaction, not noise.
+- **Source-conditioned fallback patterns.** TB models default to
+  `switch to <phase>` on vacuous cutoffs; SWE models default to
+  `resolve_error_class_B`. Symmetric across real and shuffled within a
+  source.
+- **Sonnet mode-collapse confirmed qualitatively.** Sonnet defaults to a
+  single high-prior action (12/20 `use file_a` in TB-real-matchs vs Haiku's
+  3/20). This default lifts both real and shuffled rates, compressing the
+  gap as predicted in §5.3 of WRITEUP.md.
+
+### Pending — git-lfs
+
+The task brief requested setting up git-lfs for `results/raw/` (Part 1).
+Status: **NOT EXECUTED**, awaiting confirmation.
+
+- `git-lfs` is not installed locally (`git lfs version` errors)
+- Install requires `brew install git-lfs` (system change)
+- 111 MB across 28,465 files would land within GitHub's 1 GB free LFS
+  quota but consume ~111 MB of bandwidth per clone
+- Per the task brief: "Wait for explicit confirmation before committing
+  and pushing"
+
+Analysis 3 ran against the local `results/raw/` directly without needing
+LFS. The error-analysis output (`supplementary/error_analysis/*.jsonl`,
+~250 KB) is small and committable directly.
+
+### Files Created or Modified
+
+| File | Action |
+|------|--------|
+| `scripts/supplementary/03_error_analysis.py` | Bug fix (dict key rename) |
+| `supplementary/error_analysis/_status.json` | Removed (stale placeholder) |
+| `supplementary/error_analysis/*.jsonl` | Generated (16 files, 320 cases) |
+| `SUPPLEMENTARY.md` | §3 expanded with full error-analysis findings |
+| `PROPOSED_CHANGES.md` | Added 3 new §5 proposals + updated §3 note |
+| `SESSION_LOG.md` | This entry |
+
+### Next-session pickup
+
+1. Decide whether to install git-lfs and push `results/raw/` to LFS
+   (~111 MB), or leave raw responses local-only.
+2. Decide whether to commit the error-analysis output JSONL files
+   (~250 KB) to the repo so SUPPLEMENTARY.md §3 case-ID references are
+   resolvable.
+3. Human review of the three new PROPOSED_CHANGES.md proposals before
+   any incorporation into a finalised RESULTS.md / WRITEUP.md.

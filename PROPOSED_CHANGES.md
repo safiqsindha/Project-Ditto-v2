@@ -60,8 +60,70 @@ Current text (if any) should be extended with:
 
 ## Note on error analysis (§3)
 
-Analysis 3 (per-case qualitative error analysis) could not be run because
-`results/raw/` was not committed to this repository. The findings in §5 that rely
-on qualitative characterisation of failure modes are therefore unverified. Push
-`results/raw/` and re-run `scripts/supplementary/03_error_analysis.py` to complete
-this analysis.
+~~Analysis 3 could not be run.~~ **Run completed 2026-04-23.** See SUPPLEMENTARY.md
+§3 for full results. Key qualitative findings below are proposed for the
+Discussion section based on §3.
+
+---
+
+## Proposed addition to §5.2 (the SWE-TA anomaly mechanism)
+
+Currently §5.2 of WRITEUP.md attributes the SWE-TA reversal to "SWE TA
+distribution is highly concentrated (file_B = 33% of TA constraints)... shuffled
+chains inherit this prior". SUPPLEMENTARY §3.7 provides the case-level evidence
+for this claim. Suggested extension:
+
+> The qualitative error analysis (Supplementary §3.7) confirms the proposed
+> mechanism at the case level. In all four sampled SWE-Sonnet shuffled-match
+> ToolAvailability cases, three out of four had GT `file_b` and the model
+> produced its default `use file_B` response. In the seven sampled SWE-Sonnet
+> real-fail TA cases, GT was varied (`file_a`, `file_g`, `test_suite`) and the
+> model's `file_B`/`error_class_B` defaults missed. The negative gap is a real
+> artefact of how the model's default-guess prior interacts with the marginal
+> versus conditional ToolAvailability distributions in SWE; it is not statistical
+> noise. A scoring metric that conditioned on local context rather than
+> marginal-distribution match would likely reverse the sign — left for
+> follow-up work.
+
+---
+
+## Proposed addition to §5.3 (Sonnet compression — qualitative confirmation)
+
+Currently §5.3 frames Sonnet's lower L1 gap as the "smarter-models compress the
+gap" effect. Supplementary §3.6 confirms this qualitatively:
+
+> Supplementary §3.6 finds that Sonnet shows stronger response mode-collapse
+> than Haiku: in TB-Sonnet real-match cases, `use file_a` appears in 12/20
+> responses; in TB-Haiku real-match cases the same prefix appears only 3/20
+> with phase transitions and error resolutions making up the rest. Sonnet
+> defaults more aggressively to a single high-prior action (`use file_A` in
+> TB; `resolve_error_class_B` in SWE). This default fires on both real and
+> shuffled chains alike, lifting the shuffled rate and compressing the gap.
+> Haiku's more varied response distribution loses on "easy" cases but is more
+> discriminating between conditions.
+
+---
+
+## Proposed addition to §5 (new subsection: failure-mode characterisation)
+
+> **§5.x Source-conditioned response priors.** The error analysis (Supplementary
+> §3.4–3.5) finds that when the model cannot predict the next constraint
+> (typically because the cutoff is a `ResourceBudget(context_window)`), it
+> falls back to a source-conditioned default: `switch to <phase>` on TB,
+> `resolve_error_class_B` on SWE. The fallback is symmetric across real and
+> shuffled within a source — the model fails the same way on the same vacuous-
+> cutoff cases. This supports the actionable-L1 refinement (§5.1): vacuous
+> cutoffs do not differentiate the conditions and are correctly excluded by
+> the refinement.
+
+---
+
+## What the error analysis does NOT support
+
+- It does not propose any change to the headline numbers in §4 of WRITEUP.md.
+- It does not propose changing the pre-registered scoring metric. The
+  marginal-vs-conditional metric question (§3.7) is flagged as follow-up work,
+  not a v2 amendment.
+- It does not weaken the actionable-L1 refinement — if anything, the
+  source-conditioned fallback pattern (§3.4–3.5) strengthens the argument that
+  vacuous cutoffs were correctly identified as non-differentiating.

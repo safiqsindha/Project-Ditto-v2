@@ -1,0 +1,22 @@
+{
+  "status": "raw_results_not_available",
+  "message": "results/raw/ was not committed to this repository. Push raw evaluation responses and re-run this script.",
+  "expected_files": [
+    "haiku_tb_real_matchs.jsonl",
+    "haiku_tb_real_failures.jsonl",
+    "haiku_tb_shuffled_matchs.jsonl",
+    "haiku_tb_shuffled_failures.jsonl",
+    "haiku_swe_real_matchs.jsonl",
+    "haiku_swe_real_failures.jsonl",
+    "haiku_swe_shuffled_matchs.jsonl",
+    "haiku_swe_shuffled_failures.jsonl",
+    "sonnet_tb_real_matchs.jsonl",
+    "sonnet_tb_real_failures.jsonl",
+    "sonnet_tb_shuffled_matchs.jsonl",
+    "sonnet_tb_shuffled_failures.jsonl",
+    "sonnet_swe_real_matchs.jsonl",
+    "sonnet_swe_real_failures.jsonl",
+    "sonnet_swe_shuffled_matchs.jsonl",
+    "sonnet_swe_shuffled_failures.jsonl"
+  ]
+}

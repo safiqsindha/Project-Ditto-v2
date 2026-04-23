@@ -1,0 +1,116 @@
+{
+  "hypothesis_a_entropy": {
+    "tb": {
+      "n_state_signatures": 354,
+      "mean_entropy_nats": 0.7305,
+      "median_entropy_nats": 0.6931,
+      "std_entropy_nats": 0.559,
+      "min_entropy_nats": 0.0,
+      "max_entropy_nats": 2.0141
+    },
+    "swe": {
+      "n_state_signatures": 3485,
+      "mean_entropy_nats": 0.9281,
+      "median_entropy_nats": 1.0397,
+      "std_entropy_nats": 0.5893,
+      "min_entropy_nats": 0.0,
+      "max_entropy_nats": 2.385
+    },
+    "mann_whitney_u": 735915.5,
+    "p_two_sided": 0.0,
+    "p_one_sided_swe_greater": 0.0,
+    "hypothesis_confirmed": true,
+    "interpretation": "SWE has higher mean entropy than TB \u2014 action space is less predictable at each state, consistent with SWE showing lower Layer 1 gap."
+  },
+  "hypothesis_b_concentration": {
+    "tb_all_sigs": {
+      "mean_top3_coverage": 0.9389,
+      "median_top3_coverage": 1.0,
+      "n": 354
+    },
+    "swe_all_sigs": {
+      "mean_top3_coverage": 0.9022,
+      "median_top3_coverage": 1.0,
+      "n": 3485
+    },
+    "mann_whitney_p_two_sided": 0.000216,
+    "hypothesis_confirmed": false,
+    "interpretation": "SWE does NOT have higher top-3 concentration than TB."
+  },
+  "hypothesis_c_carrier_type": {
+    "tb_gaps_by_type": {
+      "ResourceBudget": 0.0032,
+      "ToolAvailability": 0.1115,
+      "InformationState": 0.1174,
+      "SubGoalTransition": -0.0488,
+      "CoordinationDependency": -0.2222
+    },
+    "swe_gaps_by_type": {
+      "ResourceBudget": 0.0007,
+      "ToolAvailability": -0.0094,
+      "InformationState": 0.1087,
+      "SubGoalTransition": 0.0,
+      "CoordinationDependency": -0.036
+    },
+    "tb_dominant_carrier": "InformationState",
+    "swe_dominant_carrier": "InformationState",
+    "carrier_type_differs": false,
+    "fisher_exact_IS_vs_other": {
+      "contingency_2x2": [
+        [
+          10,
+          120
+        ],
+        [
+          17,
+          1
+        ]
+      ],
+      "odds_ratio": 0.0049,
+      "p_value": 0.0
+    },
+    "interpretation": "Same dominant carrier in both sources: InformationState. Fisher's exact p=0.0000."
+  },
+  "hypothesis_d_sonnet_compression": {
+    "per_source_l1": {
+      "tb": {
+        "haiku_gap": 0.0425,
+        "sonnet_gap": 0.0346,
+        "gap_difference": 0.0079,
+        "z_stat": 0.4557,
+        "p_value": 0.6486,
+        "significant": false
+      },
+      "swe": {
+        "haiku_gap": 0.0093,
+        "sonnet_gap": 0.0035,
+        "gap_difference": 0.0058,
+        "z_stat": 0.7769,
+        "p_value": 0.4372,
+        "significant": false
+      }
+    },
+    "pooled_l1": {
+      "pooled_gap_difference": 0.0061,
+      "pooled_se": 0.0069,
+      "z_stat": 0.8938,
+      "p_value": 0.3714,
+      "significant": false
+    },
+    "per_source_l2": {
+      "tb": {
+        "haiku_gap": 0.0488,
+        "sonnet_gap": 0.0884,
+        "difference": -0.0396
+      },
+      "swe": {
+        "haiku_gap": 0.0671,
+        "sonnet_gap": 0.0684,
+        "difference": -0.0013
+      }
+    },
+    "sonnet_compression_consistent": true,
+    "sonnet_compression_significant": 0,
+    "interpretation": "Haiku shows larger L1 gap than Sonnet in both source(s). Pooled gap-difference = 0.0061 (z=0.89, p=0.3714). Gap compression is present but not statistically significant (consistent with noise at current sample size)."
+  }
+}

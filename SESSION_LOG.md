@@ -1122,3 +1122,56 @@ Frame the v2 result as **"the constraint-chain abstraction reproduces in program
 
 No further methodology changes recommended; pre-registered thresholds remain the report contract.
 
+
+---
+
+## Session 11 (Supplementary) — 2026-04-23
+
+### Tasks Completed
+
+Added four supplementary analyses contextualising the primary result.
+No modifications to RESULTS.md §4, SPEC.md, scoring code, or reference distributions.
+
+- **Analysis 1 — Power analysis** (`scripts/supplementary/01_power_analysis.py`)
+  - Layer 2: fully powered (≥0.999) in all four cells
+  - Layer 1 TB: adequately powered (haiku 0.93, sonnet 0.73); non-clearing is substantive
+  - Layer 1 SWE: severely underpowered (haiku 0.43, sonnet 0.10); null is uninformative
+  - Required N to detect observed SWE effect: ~7,500 (haiku), ~58,000 (sonnet)
+
+- **Analysis 2 — Stratified breakdowns** (`scripts/supplementary/02_stratified_breakdowns.py`)
+  - InformationState: dominant positive carrier in both sources (haiku::swe p<0.001,
+    haiku::tb p=0.075); consistent across models
+  - ToolAvailability: positive in TB (haiku p=0.001, sonnet p=0.039), **negative** in
+    SWE (sonnet p=0.002) — anomalous direction reversal
+  - ResourceBudget/SubGoalTransition: no signal anywhere
+  - Length bucket: effect distributed across all bins; no concentration
+
+- **Analysis 3 — Error analysis** (`scripts/supplementary/03_error_analysis.py`)
+  - Cannot run: results/raw/ not committed to this repo
+  - Script exits gracefully with instructions; placeholder status file written
+
+- **Analysis 4 — Cross-cell interaction** (`scripts/supplementary/04_interaction_analysis.py`)
+  - (a) Entropy hypothesis CONFIRMED: SWE mean entropy 0.928 vs TB 0.731 nats (p≈0)
+  - (b) Concentration hypothesis REFUTED: TB higher top-3 coverage (0.939 vs 0.902)
+  - (c) Carrier-type shift REFUTED: InformationState dominant in both sources
+  - (d) Sonnet compression: directionally consistent but not significant (p=0.37)
+
+- Wrote `SUPPLEMENTARY.md` with full tables and interpretations
+- Wrote `PROPOSED_CHANGES.md` with candidate additions to RESULTS.md §5 for human review
+- Did NOT modify RESULTS.md §4, SPEC.md, src/, or reference distributions
+
+### Files Created
+
+| File | Action |
+|------|--------|
+| `scripts/supplementary/01_power_analysis.py` | Created |
+| `scripts/supplementary/02_stratified_breakdowns.py` | Created |
+| `scripts/supplementary/03_error_analysis.py` | Created |
+| `scripts/supplementary/04_interaction_analysis.py` | Created |
+| `supplementary/power_results.json` | Generated |
+| `supplementary/stratified_results.json` | Generated |
+| `supplementary/interaction_results.json` | Generated |
+| `supplementary/error_analysis/_status.json` | Generated (placeholder) |
+| `SUPPLEMENTARY.md` | Created |
+| `PROPOSED_CHANGES.md` | Created |
+| `SESSION_LOG.md` | This entry |

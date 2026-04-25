@@ -1326,3 +1326,155 @@ Four methodological issues were identified in `src/scorer.py`:
 `RESULTS.md` has NOT been modified. The corrected scoring findings are in
 `CORRECTED_SCORING.md` for co-author review. Co-authors must decide on the
 actionable L1 estimand question before updating primary artifacts.
+
+---
+
+## Methodological Review v2 — 2026-04-23
+
+### Background
+
+Independent verification (`VERIFICATION_REPORT.md`, 2026-04-23) confirmed that
+`src/scorer_corrected.py` is computationally correct, but its actionable-subset
+filter produces an **inflated estimand**. Specifically (VERIFICATION_REPORT Check 3):
+
+- The first correction filtered pairs by real chain actionability only
+  (`if p.real_l1_actionable:`), including pairs where the SHUFFLED chain has a
+  non-actionable constraint at cutoff\_k.
+- 59.7% of the 774 haiku::tb "actionable" pairs in the first correction have
+  non-actionable shuffled constraints (ResourceBudget: 438, OptimizationCriterion: 15,
+  CoordinationDependency: 9).
+- These pairs have near-zero shuffled match rates (RB: 1.1%, OC: 0.0%, CD: 0.0%),
+  depressing the shuffled baseline from 0.0929 → 0.0439 and inflating the gap
+  from 0.066 → 0.115. This is not a causal-structure detection comparison.
+
+### Decision
+
+Implement `src/scorer_corrected_v2.py`: paired tests (McNemar + paired t-test) with
+the **original filter rule** (BOTH real AND shuffled chains must have an actionable
+constraint at cutoff\_k for a pair to enter the actionable Layer 1 analysis).
+
+This restores the original estimand (apples-to-apples comparison) while fixing the
+statistical test (unpaired → paired).
+
+### Actions Taken
+
+- `src/scorer_corrected_v2.py` created (neither `scorer.py` nor `scorer_corrected.py` modified)
+- `results/scored_corrected_v2.json` produced by running v2 scorer against existing
+  `results/raw/` (no new API calls)
+- `CORRECTED_SCORING_v2.md` written with three-way side-by-side comparison (original /
+  first correction / second correction) and explicit recommendation
+
+### Key Findings from Second Correction
+
+1. **Filter change reduces actionable sample size for TB:**
+   n\_pairs drops from 774 (first correction) to **312** (second correction) for TB cells.
+   This is correct: 40.3% of shuffled TB variants happen to be actionable.
+
+2. **Gap for haiku::tb: 0.0801** (vs original 0.066, first correction 0.115).
+   The gap is between the two prior estimates, as expected. The value of 0.0801 (not 0.066)
+   is a known result of the paired estimand: within "both-actionable" pairs, the real\_rate
+   is 0.1731 (slightly higher than the unpaired 0.1589 due to selection — see
+   CORRECTED_SCORING\_v2.md §2 for full explanation). The shuffled\_rate (0.0929) is identical
+   to the original. This was pre-documented in VERIFICATION\_REPORT Check 3
+   ("312 (40.3%) | 0.0929 | 0.0801").
+
+3. **Pre-registered threshold MET by haiku::tb** (gap=0.0801≥0.05, Bonferroni p=0.0116<0.05).
+   sonnet::tb does NOT meet the threshold under v2 (gap=0.0545, Bonferroni p=0.2444).
+
+4. **Layer 2 unchanged:** All four cells p<0.0001, gaps identical to prior scorers.
+
+5. **Recommendation:** `scorer_corrected_v2.py` is the methodologically correct version.
+   `scorer_corrected.py` should NOT be adopted — its 0.115 figures are an inflated estimand.
+   See CORRECTED_SCORING\_v2.md §6 for full rationale.
+
+### PRIMARY RESULTS NOT YET UPDATED
+
+`RESULTS.md` has NOT been modified. Co-authors should review `CORRECTED_SCORING_v2.md`
+and decide whether to adopt v2 as primary and update `RESULTS.md` accordingly.
+
+### Files Created
+
+| File | Action |
+|------|--------|
+| `src/scorer_corrected_v2.py` | Created (new, additive) |
+| `results/scored_corrected_v2.json` | Generated (new) |
+| `CORRECTED_SCORING_v2.md` | Created (new) |
+| `SESSION_LOG.md` | This entry |
+
+---
+
+## Session 16 — 2026-04-25
+
+### Tasks Completed
+
+Created clean `RESULTS.md` adopting `scorer_corrected_v2.py` numbers as the primary
+results. `WRITEUP.md` preserved with a redirect note at the top.
+
+### What was done
+
+1. Read all five required documents in order: `WRITEUP.md`, `CORRECTED_SCORING_v2.md`,
+   `SUPPLEMENTARY.md`, `SPEC.md`, `results/scored_corrected_v2.json`.
+
+2. Created `RESULTS.md` from scratch at repo root with the following sections:
+   - Status, Abstract, §1 Hypothesis, §2 Pre-registered Success Criteria
+   - §3 Methods (data sources, pipeline, eval params, scoring layers, methodology
+     hardening note including the correction disclosure)
+   - §4 Results (primary table with corrected v2 numbers, all-cutoffs table, threshold
+     check, variance study under corrected methodology)
+   - §5 Discussion (what evidence supports / doesn't support; §5.3 full correction
+     disclosure paragraph; asymmetries and structural explanations updated to reflect
+     §4c refutation from SUPPLEMENTARY; comparison to v1 with corrected numbers;
+     implications and caveats)
+   - §6 Supplementary Analyses Summary
+   - §7 Conclusion
+   - Appendix A: Reproducibility (with corrected scorer command)
+   - Appendix B: Methodology Correction Trail
+
+3. Added redirect note to top of `WRITEUP.md` — content otherwise unchanged.
+
+### Key differences from WRITEUP.md
+
+- **Primary table numbers updated:** haiku::tb L1 actionable gap 0.066 → 0.0801;
+  Bonferroni-corrected p = 0.0116 added; sonnet::tb no longer meets threshold (gap 0.055,
+  Bonf p = 0.244 vs original p = 0.265); haiku::swe gap 0.014 → 0.0053; sonnet::swe −0.0042.
+- **Tests updated:** z-test/Welch's replaced by McNemar/paired-t throughout; Bonferroni
+  correction added.
+- **Carrier-type shift hypothesis corrected:** WRITEUP.md §5.2 framed ToolAvailability
+  (TB) and InformationState (SWE) as source-specific carriers. SUPPLEMENTARY §4c refutes
+  this — InformationState is the universal carrier in both sources. Updated §5.4 accordingly.
+- **Variance study weakened:** WRITEUP.md noted one of three configs had gap 0.086 p=0.031
+  for haiku::tb. Under corrected methodology the same config has gap=0.096, p=0.055 —
+  not individually significant. Reported as supplementary context only.
+- **Strong-positive threshold characterisation updated:** Original noted "not met at
+  primary config." RESULTS.md §4.2 clarifies that Haiku-TB gap = 0.0801 clears the gap
+  sub-threshold but the Bonferroni-corrected p = 0.0116 exceeds the 0.01 p sub-threshold.
+- **Methodology correction disclosure added:** §5.3 contains the full required paragraph
+  and Appendix B documents the correction trail.
+- **Inflated 0.115 numbers excluded:** Do not appear anywhere in RESULTS.md as primary
+  or alternative results.
+
+### Gate Status
+
+Not applicable (documentation task).
+
+### Files Created / Modified
+
+| File | Action |
+|------|--------|
+| `RESULTS.md` | Created (new — canonical results document) |
+| `WRITEUP.md` | Modified — redirect note added at top; content otherwise unchanged |
+| `SESSION_LOG.md` | This entry |
+
+### No other files modified
+
+`SPEC.md`, scorer source files, `scored.json`, `scored_corrected.json`,
+`scored_corrected_v2.json`, `CORRECTED_SCORING.md`, `CORRECTED_SCORING_v2.md`,
+`SUPPLEMENTARY.md`, `VERIFICATION_REPORT.md` — all unchanged.
+
+### Next session
+
+No immediate follow-up required. If preparing for submission, consider:
+- Deciding whether to retain WRITEUP.md in the repo or archive it
+- Whether the variance study per-config actionable numbers warrant a dedicated
+  supplementary table
+- Confirming author list and affiliations for RESULTS.md Status block

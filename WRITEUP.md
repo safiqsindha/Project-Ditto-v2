@@ -1,6 +1,12 @@
 # Project Ditto v2 — Replication and Generality of the Constraint-Chain Abstraction on Programming-Task Telemetry
 
-**Status:** Draft — write-up in progress.
+> **This document is superseded by [RESULTS.md](RESULTS.md).**
+> `RESULTS.md` is the canonical results document; it uses `scorer_corrected_v2.py` numbers
+> as primary and includes the post-hoc statistical correction disclosure. This file is
+> preserved as a record of the original (pre-correction) write-up. Do not cite numbers
+> from this file as primary results.
+
+**Status:** Draft — superseded by RESULTS.md (2026-04-25).
 **Pre-registration:** [SPEC.md](SPEC.md) + `SPEC.pdf` (v1.1, committed 2026-04-22, frozen before evaluation).
 **Prior work:** [Project Ditto v1](https://github.com/safiqsindha/Project-Ditto) (Pokémon telemetry).
 

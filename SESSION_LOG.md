@@ -1478,3 +1478,54 @@ No immediate follow-up required. If preparing for submission, consider:
 - Whether the variance study per-config actionable numbers warrant a dedicated
   supplementary table
 - Confirming author list and affiliations for RESULTS.md Status block
+
+---
+
+## Session 17 — 2026-04-25
+
+### Tasks Completed
+
+Amended `RESULTS.md` to reference v1's corrected numbers in the comparison section and
+to document cross-experiment methodology consistency.
+
+### v1 corrected numbers used
+
+- Sonnet: corrected gap 0.206, McNemar χ²=981.9, Bonferroni p ≪ 10⁻²¹²
+- Haiku: corrected gap 0.066, McNemar χ²=118.3, Bonferroni p ≪ 10⁻²⁵
+- Bonferroni applied across n=2 cells (1 source × 2 models) in v1
+
+### Specific edits to RESULTS.md
+
+1. **§5.5 Comparison to v1** — Updated table to use corrected v1 numbers (0.206 Sonnet,
+   0.066 Haiku) in place of original published numbers (0.20, 0.059). Added row for
+   outcome tier. Added preamble noting both experiments now use consistent corrected
+   methodology. Updated narrative to note that Haiku-v1 corrected gap (0.066) is
+   numerically close to v2 Haiku-TB gap (0.0801), suggesting consistent Haiku-class
+   gap magnitudes across domains.
+
+2. **§3.6 (new) — Cross-Experiment Methodology Consistency** — Added two-paragraph
+   subsection after §3.5 documenting that v1 and v2 underwent the same post-hoc
+   correction, use identical statistical methodology, differ only in Bonferroni divisor
+   (n=2 for v1, n=4 for v2), and that v3 will pre-register the corrected methodology
+   upfront.
+
+3. **Appendix A** — Added cross-experiment reproducibility note explaining the shared
+   methodology and Bonferroni divisor difference, with pointer to v1 repo.
+
+### Confirmation of cross-experiment consistency
+
+Both v1 and v2 now use McNemar (L1) + paired t-test (L2) + Bonferroni correction across
+primary cells. Both published findings preserved. v1: `strong_positive` on both models
+with extreme confidence. v2: `moderate_positive` on Haiku-TB (Bonf. p = 0.0116).
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `RESULTS.md` | Amended — §3.6 added; §5.5 updated; Appendix A updated |
+| `SESSION_LOG.md` | This entry |
+
+### No other files modified
+
+Scorer source files, scored JSON files, SPEC.md, CORRECTED_SCORING*.md,
+SUPPLEMENTARY.md, VERIFICATION_REPORT.md, WRITEUP.md — all unchanged.

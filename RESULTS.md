@@ -176,6 +176,24 @@ is preserved in `results/scored.json` for the record.
 - ≥90% non-max-backoff reference coverage; 100% achieved on both sources (Gate 4 PASS).
 - Multi-seed multi-temperature committed to spec before any scoring.
 
+### 3.6 Cross-Experiment Methodology Consistency
+
+In parallel with v2's correction, v1 (Pokémon telemetry) underwent the same post-hoc
+methodological review and applied the identical correction: unpaired z-test / Welch's
+t-test replaced by McNemar's test (Layer 1) and paired *t*-test (Layer 2), with Bonferroni
+correction across the primary cells. The Bonferroni divisor differs by design — v1 applied
+correction across 2 cells (1 source × 2 models), v2 across 4 cells (2 sources × 2 models)
+— reflecting each experiment's pre-registered scope. Both experiments' corrected scorers
+(`scorer_corrected_v2.py` in v2; the equivalent corrected scorer in the v1 repo) share the
+same statistical methodology and filter logic. Both published findings are preserved under
+correction: v1 retains `strong_positive` on both models with extreme confidence; v2 retains
+`moderate_positive` on Haiku-TB.
+
+This consistency matters for cross-experiment comparability. All numerical comparisons
+between v1 and v2 in §5.5 use corrected figures from both experiments. Project Ditto v3
+(forthcoming, third domain) will pre-register the corrected methodology upfront, eliminating
+the need for post-hoc revision.
+
 ---
 
 ## 4. Results
@@ -330,18 +348,26 @@ strategies rather than a simple capability deficit.
 
 ### 5.5 Comparison to v1
 
-| | v1 (Pokémon) | v2 (Programming, corrected) |
-|--|--------------|------------------------------|
-| Sonnet L1 actionable gap | 0.20 | +0.055 (TB), −0.004 (SWE) |
-| Haiku L1 actionable gap | 0.059 | **+0.080** (TB), +0.005 (SWE) |
+Both v1 and v2 now use consistent corrected methodology (McNemar, paired *t*-test,
+Bonferroni correction); the numbers below are corrected figures from both experiments.
+V1's correction (Bonferroni across n=2 cells: 1 source × 2 models) preserved both
+published findings with extreme confidence.
+
+| | v1 (Pokémon, corrected) | v2 (Programming, corrected) |
+|--|-------------------------|------------------------------|
+| Sonnet L1 actionable gap | 0.206 (McNemar χ²=981.9, Bonf. p ≪ 10⁻²¹²) | +0.055 (TB), −0.004 (SWE) |
+| Haiku L1 actionable gap | 0.066 (McNemar χ²=118.3, Bonf. p ≪ 10⁻²⁵) | **+0.080** (TB), +0.005 (SWE) |
+| Outcome tier | `strong_positive` (both models) | `moderate_positive` (Haiku-TB only) |
 | Direction (L1, all cells) | Positive | Positive in 7/8 cells |
 | L2 significance | ≪0.001 | ≪0.001 (all 4 cells) |
 
-The Sonnet effect is much smaller in v2 than v1. Two non-exclusive explanations:
-(a) programming chains carry less local autocorrelation than Pokémon battle telemetry;
-(b) Sonnet 4.6 is a stronger model than Sonnet 3.x and the smarter-model gap compression
-is more pronounced. The Haiku actionable result (0.080 on TB) is larger than v1's Haiku
-gap (0.059) in absolute terms — consistent with explanation (b).
+The Sonnet effect is much smaller in v2 than v1 (0.055 TB vs 0.206). Two non-exclusive
+explanations: (a) programming chains carry less local autocorrelation than Pokémon battle
+telemetry; (b) Sonnet 4.6 is a stronger model than Sonnet 3.x and the smarter-model gap
+compression is more pronounced. The Haiku actionable result on TB (0.0801) is numerically
+very close to v1's corrected Haiku gap (0.066), suggesting that Haiku-class models show
+consistent gap magnitudes across these two structurally distinct domains — consistent with
+explanation (b) as a significant contributor to the Sonnet divergence.
 
 ### 5.6 Implications and Caveats
 
@@ -448,6 +474,13 @@ python3.11 -m src.scorer_corrected_v2 \
   --chains-shuffled chains/shuffled/ \
   --out results/scored_corrected_v2.json
 ```
+
+**Cross-experiment reproducibility note:** Both v1 and v2 corrected scorers use identical
+statistical methodology — McNemar's test (Layer 1), paired *t*-test (Layer 2), Bonferroni
+correction across primary cells. The only structural difference is the Bonferroni divisor:
+n=2 in v1 (single-source design, 2 models) vs n=4 in v2 (two-source design, 2 models × 2
+sources). To reproduce v1 corrected scoring, see the v1 repository
+(`github.com/safiqsindha/Project-Ditto`) and its equivalent corrected scorer.
 
 ---
 
